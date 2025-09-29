@@ -1,0 +1,176 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-time Dot Movement Tracker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Use the Inter font for a clean, modern look */
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* This container holds both the video and the canvas, ensuring they stack correctly */
+        #video-container {
+            position: relative;
+            width: 100%;
+            max-width: 800px;
+            border-radius: 0.75rem;
+            overflow: hidden;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            /* Maintain a 4:3 aspect ratio to prevent layout shifts when the camera loads */
+            aspect-ratio: 640 / 480;
+        }
+        /* Position video and canvas absolutely within the container to overlay them */
+        video, canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover; /* Ensure the video fills the container without distortion */
+            border-radius: 0.75rem;
+        }
+        #overlay-canvas {
+            /* The canvas should not intercept mouse clicks */
+            pointer-events: none;
+        }
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+<body class="bg-gray-900 text-white flex flex-col items-center justify-center min-h-screen p-4 md:p-8">
+
+    <div class="w-full max-w-4xl text-center">
+        <h1 class="text-4xl md:text-5xl font-bold mb-2 bg-gradient-to-r from-teal-400 to-blue-500 text-transparent bg-clip-text">Dot Movement Tracker</h1>
+        <p class="text-gray-400 mb-6 text-lg">Your motion is visualized as a cascade of glowing particles.</p>
+
+        <div id="video-container" class="mx-auto bg-gray-800">
+            <!-- The video element streams the webcam feed -->
+            <video id="video" playsinline autoplay muted></video>
+            <!-- The canvas is layered on top to draw the movement dots -->
+            <canvas id="overlay-canvas"></canvas>
+        </div>
+
+        <div id="message-box" class="mt-6 p-4 bg-gray-800 rounded-lg text-gray-300 hidden">
+            <!-- Messages to the user, like camera permission errors, will appear here -->
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const overlayCanvas = document.getElementById('overlay-canvas');
+        const overlayCtx = overlayCanvas.getContext('2d');
+        const messageBox = document.getElementById('message-box');
+
+        // We use a second, hidden canvas to process video frames without affecting the display
+        const processCanvas = document.createElement('canvas');
+        const processCtx = processCanvas.getContext('2d');
+
+        let lastFrameData = null;
+
+        // --- Configuration Settings ---
+        const config = {
+            // How much a pixel's color needs to change to be considered "motion". Lower is more sensitive.
+            motionThreshold: 20, 
+            // The size of the dots drawn on the screen.
+            dotRadius: 1.5,
+            // The opacity used to fade out old dots, creating a trail effect. Higher is a shorter trail.
+            fadeOpacity: 0.1
+        };
+
+        // A simple utility to display messages to the user
+        function showMessage(message) {
+            messageBox.textContent = message;
+            messageBox.classList.remove('hidden');
+        }
+
+        // --- Camera and Canvas Setup ---
+
+        // Asynchronously asks for camera permission and starts the video stream
+        async function startCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: 'user', // Prefer the front camera
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
+                    }
+                });
+                video.srcObject = stream;
+                // Once the video metadata is loaded, we know its dimensions and can set up our canvases
+                video.onloadedmetadata = () => {
+                    setupCanvases();
+                    requestAnimationFrame(detectMotion); // Start the motion detection loop
+                };
+            } catch (err) {
+                console.error("Error accessing camera:", err);
+                showMessage("Could not access the camera. Please grant permission in your browser and refresh the page.");
+            }
+        }
+        
+        // Sets the dimensions of our drawing canvases to match the video's actual size
+        function setupCanvases() {
+            const w = video.videoWidth;
+            const h = video.videoHeight;
+            overlayCanvas.width = w;
+            overlayCanvas.height = h;
+            processCanvas.width = w;
+            processCanvas.height = h;
+        }
+
+        // --- Core Motion Detection Logic ---
+
+        // This function runs on every frame to detect and visualize movement
+        function detectMotion() {
+            const w = processCanvas.width;
+            const h = processCanvas.height;
+            
+            // 1. Fade out the previous frame's dots to create a trail effect
+            overlayCtx.fillStyle = `rgba(0, 0, 0, ${config.fadeOpacity})`;
+            overlayCtx.fillRect(0, 0, w, h);
+
+            // 2. Draw the current video frame to the hidden canvas to analyze its pixels
+            processCtx.drawImage(video, 0, 0, w, h);
+            const currentFrame = processCtx.getImageData(0, 0, w, h);
+            const currentFrameData = currentFrame.data;
+
+            // 3. If we have a previous frame to compare against...
+            if (lastFrameData) {
+                overlayCtx.fillStyle = 'white';
+                // Loop through every pixel in the frame (each pixel has 4 values: R, G, B, A)
+                for (let i = 0; i < currentFrameData.length; i += 4) {
+                    // Calculate the total color difference between the new and old pixel
+                    const diff = Math.abs(currentFrameData[i] - lastFrameData[i]) +
+                                 Math.abs(currentFrameData[i + 1] - lastFrameData[i + 1]) +
+                                 Math.abs(currentFrameData[i + 2] - lastFrameData[i + 2]);
+
+                    // 4. If the difference is significant, we've found motion!
+                    if (diff > config.motionThreshold * 3) {
+                        // Calculate the x and y coordinates of the moving pixel
+                        const pixelIndex = i / 4;
+                        const x = pixelIndex % w;
+                        const y = Math.floor(pixelIndex / w);
+                        
+                        // 5. Draw a white dot at the location of the motion
+                        overlayCtx.beginPath();
+                        overlayCtx.arc(x, y, config.dotRadius, 0, Math.PI * 2);
+                        overlayCtx.fill();
+                    }
+                }
+            }
+
+            // 6. Store the current frame's data for the next loop iteration
+            lastFrameData = new Uint8ClampedArray(currentFrameData);
+
+            // 7. Request the next animation frame to continue the loop
+            requestAnimationFrame(detectMotion);
+        }
+        
+        // Start the camera when the page loads
+        window.addEventListener('load', startCamera);
+        // If the window is resized, adjust the canvas dimensions
+        window.addEventListener('resize', setupCanvases);
+
+    </script>
+</body>
+</html>
+
