@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Relief Effect Camera</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #111827; /* bg-gray-900 */
+        }
+        .loader {
+            border-top-color: #3b82f6; /* blue-500 */
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="text-gray-300 flex items-center justify-center min-h-screen p-4">
+
+    <div class="w-full max-w-6xl mx-auto p-6 bg-gray-800 rounded-2xl shadow-2xl space-y-6">
+        
+        <!-- Header -->
+        <div class="text-center">
+            <h1 class="text-3xl md:text-4xl font-bold text-white">Live Relief Effect</h1>
+            <p class="text-gray-400 mt-2">See your camera feed transformed into a 3D relief image in real-time.</p>
+        </div>
+
+        <!-- Video and Canvas Container -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- Original View -->
+            <div class="relative w-full aspect-video bg-gray-900 rounded-xl overflow-hidden shadow-lg">
+                <h2 class="absolute top-2 left-4 text-white font-semibold z-10 bg-black bg-opacity-40 px-3 py-1 rounded-full">Original</h2>
+                <video id="video" playsinline autoplay class="w-full h-full object-cover"></video>
+                <div id="loading" class="absolute inset-0 bg-gray-900 bg-opacity-75 flex-col items-center justify-center flex">
+                    <div class="loader ease-linear rounded-full border-8 border-t-8 border-gray-700 h-24 w-24 mb-4"></div>
+                    <p class="text-lg font-medium">Starting Camera...</p>
+                </div>
+            </div>
+            
+            <!-- Relief Effect View -->
+            <div class="relative w-full aspect-video bg-gray-900 rounded-xl overflow-hidden shadow-lg">
+                <h2 class="absolute top-2 left-4 text-white font-semibold z-10 bg-black bg-opacity-40 px-3 py-1 rounded-full">Relief Effect</h2>
+                <canvas id="canvas" class="w-full h-full object-cover"></canvas>
+            </div>
+        </div>
+        
+        <!-- Controls -->
+        <div id="controls" class="space-y-4 pt-4">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Depth -->
+                <div class="space-y-2">
+                    <label for="depth" class="flex justify-between items-center text-sm font-medium">
+                        <span>Depth</span>
+                        <span id="depth-value" class="text-white font-mono bg-gray-700 px-2 py-0.5 rounded">1</span>
+                    </label>
+                    <input type="range" id="depth" min="1" max="10" value="1" step="1" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                </div>
+                <!-- Height -->
+                <div class="space-y-2">
+                    <label for="height" class="flex justify-between items-center text-sm font-medium">
+                        <span>Height / Strength</span>
+                        <span id="height-value" class="text-white font-mono bg-gray-700 px-2 py-0.5 rounded">2.0</span>
+                    </label>
+                    <input type="range" id="height" min="1" max="10" value="2" step="0.1" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        const loading = document.getElementById('loading');
+        
+        const depthSlider = document.getElementById('depth');
+        const heightSlider = document.getElementById('height');
+        const depthValue = document.getElementById('depth-value');
+        const heightValue = document.getElementById('height-value');
+
+        let animationFrameId;
+        let stream;
+
+        // Update slider value displays
+        depthSlider.addEventListener('input', () => depthValue.textContent = depthSlider.value);
+        heightSlider.addEventListener('input', () => heightValue.textContent = heightSlider.value);
+        
+        async function setupCamera() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { width: 640, height: 480 }, 
+                    audio: false 
+                });
+                video.srcObject = stream;
+                video.onloadedmetadata = () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    loading.style.display = 'none';
+                    video.play();
+                    draw();
+                };
+            } catch (err) {
+                console.error("Error accessing camera: ", err);
+                loading.innerHTML = '<p class="text-red-400">Could not access camera. Please allow permissions.</p>';
+            }
+        }
+        
+        function draw() {
+            if (video.paused || video.ended) {
+                cancelAnimationFrame(animationFrameId);
+                return;
+            }
+
+            // Draw video to canvas to get pixel data
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            // Get pixel data from the canvas
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+            const width = imageData.width;
+            
+            const reliefData = ctx.createImageData(imageData);
+            const relief = reliefData.data;
+
+            const depth = parseInt(depthSlider.value, 10);
+            const height = parseFloat(heightSlider.value);
+
+            for (let i = 0; i < data.length; i += 4) {
+                const y = Math.floor(i / (width * 4));
+                const x = (i / 4) % width;
+                
+                const currentR = data[i];
+                const currentG = data[i + 1];
+                const currentB = data[i + 2];
+                const currentBrightness = (currentR + currentG + currentB) / 3;
+
+                let neighborR = 0, neighborG = 0, neighborB = 0;
+                
+                // Get the neighbor pixel based on depth
+                const neighborX = x - depth;
+                const neighborY = y - depth;
+
+                if (neighborX >= 0 && neighborY >= 0) {
+                    const neighborIndex = (neighborY * width + neighborX) * 4;
+                    neighborR = data[neighborIndex];
+                    neighborG = data[neighborIndex + 1];
+                    neighborB = data[neighborIndex + 2];
+                } else {
+                    // For edge pixels, use the current pixel's color
+                    neighborR = currentR;
+                    neighborG = currentG;
+                    neighborB = currentB;
+                }
+
+                const neighborBrightness = (neighborR + neighborG + neighborB) / 3;
+                
+                // Calculate the difference and apply the height multiplier
+                const diff = currentBrightness - neighborBrightness;
+                const newColor = 128 + diff * height;
+                
+                // Clamp values to 0-255
+                const clampedColor = Math.max(0, Math.min(255, newColor));
+
+                relief[i] = clampedColor;     // Red
+                relief[i + 1] = clampedColor; // Green
+                relief[i + 2] = clampedColor; // Blue
+                relief[i + 3] = 255;          // Alpha
+            }
+
+            // Put the modified pixel data back onto the canvas
+            ctx.putImageData(reliefData, 0, 0);
+            
+            animationFrameId = requestAnimationFrame(draw);
+        }
+
+        window.addEventListener('load', setupCamera);
+    </script>
+</body>
+</html>
