@@ -1,366 +1,229 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Camera, StopCircle, Play, Download, Sliders } from 'lucide-react';
-
-export default function TimelapseCam() {
-  const [isRecording, setIsRecording] = useState(false);
-  const [frames, setFrames] = useState([]);
-  const [countdown, setCountdown] = useState(60);
-  const [redChannel, setRedChannel] = useState(100);
-  const [greenChannel, setGreenChannel] = useState(100);
-  const [blueChannel, setBlueChannel] = useState(100);
-  const [edgeIntensity, setEdgeIntensity] = useState(50);
-  const [showControls, setShowControls] = useState(true);
-  
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
-  const intervalRef = useRef(null);
-  const countdownRef = useRef(null);
-  const streamRef = useRef(null);
-
-  useEffect(() => {
-    startCamera();
-    return () => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
-    };
-  }, []);
-
-  const startCamera = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: 'user', width: 640, height: 480 } 
-      });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        streamRef.current = stream;
-      }
-    } catch (err) {
-      alert('Camera access denied. Please allow camera permissions.');
-    }
-  };
-
-  const applyEdgeDetection = (ctx, width, height) => {
-    const imageData = ctx.getImageData(0, 0, width, height);
-    const pixels = imageData.data;
-    const output = new Uint8ClampedArray(pixels);
-    
-    // Sobel kernel
-    const sobelX = [[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]];
-    const sobelY = [[-1, -2, -1], [0, 0, 0], [1, 2, 1]];
-    
-    for (let y = 1; y < height - 1; y++) {
-      for (let x = 1; x < width - 1; x++) {
-        let gx = 0, gy = 0;
-        
-        for (let ky = -1; ky <= 1; ky++) {
-          for (let kx = -1; kx <= 1; kx++) {
-            const idx = ((y + ky) * width + (x + kx)) * 4;
-            const gray = (pixels[idx] + pixels[idx + 1] + pixels[idx + 2]) / 3;
-            gx += gray * sobelX[ky + 1][kx + 1];
-            gy += gray * sobelY[ky + 1][kx + 1];
-          }
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Creative Timelapse Camera</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #111827; /* bg-gray-900 */
         }
-        
-        const magnitude = Math.sqrt(gx * gx + gy * gy);
-        const intensity = Math.min(255, magnitude * (edgeIntensity / 50));
-        
-        const idx = (y * width + x) * 4;
-        output[idx] = intensity * (redChannel / 100);
-        output[idx + 1] = intensity * (greenChannel / 100);
-        output[idx + 2] = intensity * (blueChannel / 100);
-        output[idx + 3] = 255;
-      }
-    }
-    
-    imageData.data.set(output);
-    ctx.putImageData(imageData, 0, 0);
-  };
-
-  const captureFrame = () => {
-    const canvas = canvasRef.current;
-    const video = videoRef.current;
-    
-    if (canvas && video) {
-      const ctx = canvas.getContext('2d');
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      
-      ctx.drawImage(video, 0, 0);
-      applyEdgeDetection(ctx, canvas.width, canvas.height);
-      
-      return canvas.toDataURL('image/png');
-    }
-  };
-
-  const startRecording = () => {
-    setIsRecording(true);
-    setFrames([]);
-    setCountdown(60);
-    
-    let frameCount = 0;
-    intervalRef.current = setInterval(() => {
-      const frame = captureFrame();
-      if (frame) {
-        setFrames(prev => [...prev, frame]);
-        frameCount++;
-        
-        if (frameCount >= 300) {
-          stopRecording();
+        .loader {
+            border-top-color: #3498db;
+            animation: spin 1s linear infinite;
         }
-      }
-    }, 200); // 5 FPS = 200ms between frames
-    
-    countdownRef.current = setInterval(() => {
-      setCountdown(prev => {
-        if (prev <= 1) {
-          stopRecording();
-          return 0;
+        @keyframes spin {
+            to { transform: rotate(360deg); }
         }
-        return prev - 1;
-      });
-    }, 1000);
-  };
+    </style>
+</head>
+<body class="text-gray-200 flex items-center justify-center min-h-screen p-4">
 
-  const stopRecording = () => {
-    setIsRecording(false);
-    if (intervalRef.current) clearInterval(intervalRef.current);
-    if (countdownRef.current) clearInterval(countdownRef.current);
-  };
-
-  const downloadFrames = () => {
-    frames.forEach((frame, idx) => {
-      const link = document.createElement('a');
-      link.href = frame;
-      link.download = `frame_${String(idx + 1).padStart(3, '0')}.png`;
-      link.click();
-    });
-  };
-
-  const playTimelapse = () => {
-    if (frames.length === 0) return;
-    
-    let idx = 0;
-    const playInterval = setInterval(() => {
-      if (canvasRef.current && idx < frames.length) {
-        const img = new Image();
-        img.onload = () => {
-          const ctx = canvasRef.current.getContext('2d');
-          ctx.drawImage(img, 0, 0, canvasRef.current.width, canvasRef.current.height);
-        };
-        img.src = frames[idx];
-        idx++;
-      } else {
-        clearInterval(playInterval);
-      }
-    }, 33); // ~30 FPS playback
-  };
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 text-white p-6">
-      <div className="max-w-6xl mx-auto">
-        <div className="text-center mb-6">
-          <h1 className="text-4xl font-bold mb-2 bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
-            Timelapse Edge Detection Camera
-          </h1>
-          <p className="text-gray-300">5 FPS • 60 Seconds • 300 Frames • RGB Edge Detection</p>
+    <div class="w-full max-w-4xl mx-auto p-6 md:p-8 bg-gray-800 rounded-2xl shadow-2xl space-y-6">
+        
+        <!-- Header -->
+        <div class="text-center">
+            <h1 class="text-3xl md:text-4xl font-bold text-white">Creative Timelapse Camera</h1>
+            <p class="text-gray-400 mt-2">Adjust live preview saturation & contrast, and capture original frames.</p>
         </div>
 
-        <div className="grid lg:grid-cols-2 gap-6">
-          {/* Camera/Canvas View */}
-          <div className="bg-gray-800 rounded-xl p-4 shadow-2xl">
-            <div className="relative aspect-video bg-black rounded-lg overflow-hidden">
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                className="absolute inset-0 w-full h-full object-cover"
-                style={{ display: isRecording || frames.length === 0 ? 'block' : 'none' }}
-              />
-              <canvas
-                ref={canvasRef}
-                className="absolute inset-0 w-full h-full object-contain"
-                style={{ display: !isRecording && frames.length > 0 ? 'block' : 'none' }}
-              />
-              
-              {isRecording && (
-                <div className="absolute top-4 right-4 bg-red-500 px-4 py-2 rounded-full flex items-center gap-2 animate-pulse">
-                  <div className="w-3 h-3 bg-white rounded-full" />
-                  <span className="font-bold">{countdown}s</span>
-                </div>
-              )}
+        <!-- Video and Canvas Container -->
+        <div class="relative w-full aspect-video bg-gray-900 rounded-xl overflow-hidden shadow-lg">
+            <video id="video" playsinline autoplay class="w-full h-full object-cover hidden"></video>
+            <canvas id="canvas" class="absolute top-0 left-0 w-full h-full"></canvas>
+            <div id="loading" class="absolute inset-0 bg-gray-900 bg-opacity-75 flex-col items-center justify-center flex">
+                <div class="loader ease-linear rounded-full border-8 border-t-8 border-gray-200 h-24 w-24 mb-4"></div>
+                <p class="text-lg font-medium">Starting Camera...</p>
             </div>
-
-            {/* Controls */}
-            <div className="mt-4 flex gap-3 flex-wrap justify-center">
-              {!isRecording && frames.length === 0 && (
-                <button
-                  onClick={startRecording}
-                  className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition-all transform hover:scale-105"
-                >
-                  <Camera size={20} />
-                  Start Timelapse
-                </button>
-              )}
-              
-              {isRecording && (
-                <button
-                  onClick={stopRecording}
-                  className="bg-red-500 hover:bg-red-600 px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition-all"
-                >
-                  <StopCircle size={20} />
-                  Stop Recording
-                </button>
-              )}
-              
-              {!isRecording && frames.length > 0 && (
-                <>
-                  <button
-                    onClick={playTimelapse}
-                    className="bg-green-500 hover:bg-green-600 px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition-all"
-                  >
-                    <Play size={20} />
-                    Play Timelapse
-                  </button>
-                  <button
-                    onClick={downloadFrames}
-                    className="bg-blue-500 hover:bg-blue-600 px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition-all"
-                  >
-                    <Download size={20} />
-                    Download All
-                  </button>
-                  <button
-                    onClick={() => setFrames([])}
-                    className="bg-gray-600 hover:bg-gray-700 px-6 py-3 rounded-lg font-semibold transition-all"
-                  >
-                    Reset
-                  </button>
-                </>
-              )}
+             <div id="timelapse-info" class="absolute top-4 left-4 bg-black bg-opacity-50 px-3 py-1 rounded-lg text-sm hidden">
+                <span id="frameCount">Frames: 0 / 300</span>
             </div>
-          </div>
-
-          {/* Settings Panel */}
-          <div className="bg-gray-800 rounded-xl p-6 shadow-2xl">
-            <div className="flex items-center gap-2 mb-6">
-              <Sliders size={24} className="text-purple-400" />
-              <h2 className="text-2xl font-bold">Edge Detection Settings</h2>
+        </div>
+        
+        <!-- Controls -->
+        <div id="controls" class="space-y-4">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <!-- Saturation -->
+                <div class="space-y-2">
+                    <label for="saturation" class="flex justify-between items-center text-sm font-medium"><span>Saturation</span><span id="saturation-value">100%</span></label>
+                    <input type="range" id="saturation" min="0" max="200" value="100" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                </div>
+                <!-- Contrast -->
+                <div class="space-y-2">
+                    <label for="contrast" class="flex justify-between items-center text-sm font-medium"><span>Contrast</span><span id="contrast-value">100%</span></label>
+                    <input type="range" id="contrast" min="0" max="200" value="100" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                </div>
             </div>
+            
+            <button id="start-timelapse" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg transition-all duration-300 shadow-md disabled:bg-gray-500 disabled:cursor-not-allowed">
+                Start 60s Timelapse
+            </button>
 
-            <div className="space-y-6">
-              {/* Red Channel */}
-              <div>
-                <div className="flex justify-between mb-2">
-                  <label className="text-red-400 font-semibold">Red Channel</label>
-                  <span className="text-red-300">{redChannel}%</span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="200"
-                  value={redChannel}
-                  onChange={(e) => setRedChannel(Number(e.target.value))}
-                  disabled={isRecording}
-                  className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-red-500"
-                />
-              </div>
-
-              {/* Green Channel */}
-              <div>
-                <div className="flex justify-between mb-2">
-                  <label className="text-green-400 font-semibold">Green Channel</label>
-                  <span className="text-green-300">{greenChannel}%</span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="200"
-                  value={greenChannel}
-                  onChange={(e) => setGreenChannel(Number(e.target.value))}
-                  disabled={isRecording}
-                  className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-green-500"
-                />
-              </div>
-
-              {/* Blue Channel */}
-              <div>
-                <div className="flex justify-between mb-2">
-                  <label className="text-blue-400 font-semibold">Blue Channel</label>
-                  <span className="text-blue-300">{blueChannel}%</span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="200"
-                  value={blueChannel}
-                  onChange={(e) => setBlueChannel(Number(e.target.value))}
-                  disabled={isRecording}
-                  className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                />
-              </div>
-
-              {/* Edge Intensity */}
-              <div>
-                <div className="flex justify-between mb-2">
-                  <label className="text-purple-400 font-semibold">Edge Intensity</label>
-                  <span className="text-purple-300">{edgeIntensity}%</span>
-                </div>
-                <input
-                  type="range"
-                  min="10"
-                  max="100"
-                  value={edgeIntensity}
-                  onChange={(e) => setEdgeIntensity(Number(e.target.value))}
-                  disabled={isRecording}
-                  className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                />
-              </div>
+            <!-- Progress Bar -->
+            <div id="progress-container" class="w-full bg-gray-700 rounded-full h-2.5 hidden">
+                <div id="progress-bar" class="bg-blue-600 h-2.5 rounded-full" style="width: 0%"></div>
             </div>
-
-            {/* Stats */}
-            <div className="mt-8 bg-gray-900 rounded-lg p-4">
-              <h3 className="text-lg font-semibold mb-3 text-purple-400">Recording Stats</h3>
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <p className="text-gray-400">Frames Captured</p>
-                  <p className="text-2xl font-bold text-white">{frames.length}/300</p>
-                </div>
-                <div>
-                  <p className="text-gray-400">Time Remaining</p>
-                  <p className="text-2xl font-bold text-white">{countdown}s</p>
-                </div>
-                <div>
-                  <p className="text-gray-400">Capture Rate</p>
-                  <p className="text-xl font-bold text-white">5 FPS</p>
-                </div>
-                <div>
-                  <p className="text-gray-400">Duration</p>
-                  <p className="text-xl font-bold text-white">60s</p>
-                </div>
-              </div>
-            </div>
-          </div>
         </div>
 
-        {/* Frame Preview Gallery */}
-        {frames.length > 0 && (
-          <div className="mt-6 bg-gray-800 rounded-xl p-6 shadow-2xl">
-            <h3 className="text-xl font-bold mb-4">Captured Frames ({frames.length})</h3>
-            <div className="grid grid-cols-6 md:grid-cols-10 gap-2 max-h-64 overflow-y-auto">
-              {frames.map((frame, idx) => (
-                <img
-                  key={idx}
-                  src={frame}
-                  alt={`Frame ${idx + 1}`}
-                  className="w-full aspect-video object-cover rounded border-2 border-gray-700 hover:border-purple-400 transition-all cursor-pointer"
-                  title={`Frame ${idx + 1}`}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
+        <!-- Timelapse Gallery -->
+        <div id="gallery" class="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-10 gap-2 hidden">
+            <!-- Captured frames will be appended here -->
+        </div>
+        
+        <div id="gallery-controls" class="text-center mt-4 hidden">
+             <button id="clear-gallery" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition-all duration-300 shadow-md">
+                Clear Gallery
+            </button>
+        </div>
+
     </div>
-  );
-}
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const startBtn = document.getElementById('start-timelapse');
+        const loading = document.getElementById('loading');
+        
+        const saturationSlider = document.getElementById('saturation');
+        const contrastSlider = document.getElementById('contrast');
+        const saturationValue = document.getElementById('saturation-value');
+        const contrastValue = document.getElementById('contrast-value');
+
+        const progressContainer = document.getElementById('progress-container');
+        const progressBar = document.getElementById('progress-bar');
+        const timelapseInfo = document.getElementById('timelapse-info');
+        const frameCountEl = document.getElementById('frameCount');
+        
+        const gallery = document.getElementById('gallery');
+        const galleryControls = document.getElementById('gallery-controls');
+        const clearGalleryBtn = document.getElementById('clear-gallery');
+
+        // A temporary canvas for grabbing original frames without filters
+        const captureCanvas = document.createElement('canvas');
+        const captureCtx = captureCanvas.getContext('2d');
+
+        let animationFrameId;
+        let stream;
+        let capturedFrames = [];
+
+        // Update slider values
+        saturationSlider.addEventListener('input', () => saturationValue.textContent = `${saturationSlider.value}%`);
+        contrastSlider.addEventListener('input', () => contrastValue.textContent = `${contrastSlider.value}%`);
+        
+        async function setupCamera() {
+            startBtn.disabled = true;
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 360 }, audio: false });
+                video.srcObject = stream;
+                video.onloadedmetadata = () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    captureCanvas.width = video.videoWidth;
+                    captureCanvas.height = video.videoHeight;
+                    startBtn.disabled = false;
+                    loading.style.display = 'none';
+                    draw();
+                };
+            } catch (err) {
+                console.error("Error accessing camera: ", err);
+                loading.innerHTML = '<p class="text-red-400">Could not access camera. Please allow camera permissions.</p>';
+            }
+        }
+        
+        function draw() {
+            if (video.paused || video.ended) {
+                cancelAnimationFrame(animationFrameId);
+                return;
+            }
+
+            // Apply filters for live preview
+            const saturation = saturationSlider.value;
+            const contrast = contrastSlider.value;
+            ctx.filter = `saturate(${saturation}%) contrast(${contrast}%)`;
+
+            // Draw the filtered video to the visible canvas
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            animationFrameId = requestAnimationFrame(draw);
+        }
+
+        function startTimelapse() {
+            startBtn.disabled = true;
+            startBtn.textContent = 'Capturing...';
+            progressContainer.style.display = 'block';
+            progressBar.style.width = '0%';
+            timelapseInfo.style.display = 'block';
+            frameCountEl.textContent = 'Frames: 0 / 300';
+            capturedFrames = [];
+            gallery.innerHTML = '';
+            gallery.style.display = 'none';
+            galleryControls.style.display = 'none';
+
+            const totalFrames = 300;
+            const duration = 60000; // 60 seconds
+            const interval = duration / totalFrames; // 200ms for 5fps
+            let frameCounter = 0;
+
+            const captureInterval = setInterval(() => {
+                if (frameCounter >= totalFrames) {
+                    clearInterval(captureInterval);
+                    finishTimelapse();
+                    return;
+                }
+                
+                frameCounter++;
+                
+                // Draw the original video frame to the hidden capture canvas
+                captureCtx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
+                // Get the data URL of the original, unfiltered frame
+                const frameDataUrl = captureCanvas.toDataURL('image/jpeg');
+                capturedFrames.push(frameDataUrl);
+
+                // Update UI
+                const progress = (frameCounter / totalFrames) * 100;
+                progressBar.style.width = `${progress}%`;
+                frameCountEl.textContent = `Frames: ${frameCounter} / ${totalFrames}`;
+
+            }, interval);
+        }
+
+        function finishTimelapse() {
+            startBtn.disabled = false;
+            startBtn.textContent = 'Start 60s Timelapse';
+            progressContainer.style.display = 'none';
+            timelapseInfo.style.display = 'none';
+            
+            displayGallery();
+        }
+
+        function displayGallery() {
+            gallery.innerHTML = '';
+            if (capturedFrames.length > 0) {
+                gallery.style.display = 'grid';
+                galleryControls.style.display = 'block';
+                capturedFrames.forEach(frame => {
+                    const img = document.createElement('img');
+                    img.src = frame;
+                    img.className = 'w-full h-full object-cover rounded-md shadow-sm';
+                    gallery.appendChild(img);
+                });
+            }
+        }
+        
+        clearGalleryBtn.addEventListener('click', () => {
+            capturedFrames = [];
+            gallery.innerHTML = '';
+            gallery.style.display = 'none';
+            galleryControls.style.display = 'none';
+        });
+
+        startBtn.addEventListener('click', startTimelapse);
+
+        window.addEventListener('load', setupCamera);
+    </script>
+</body>
+</html>
