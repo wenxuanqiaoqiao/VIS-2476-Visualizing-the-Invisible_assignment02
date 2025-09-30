@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Webcam Relief Effect</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            color: #e5e7eb;
+            background-color: #111827;
+            overflow: hidden;
+        }
+        .control-panel label {
+            margin-bottom: 0.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: 500;
+        }
+        .control-panel input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 8px;
+            background: #374151;
+            border-radius: 5px;
+            outline: none;
+            opacity: 0.7;
+            transition: opacity .2s;
+        }
+        .control-panel input[type="range"]:hover {
+            opacity: 1;
+        }
+        .control-panel input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            background: #3b82f6;
+            cursor: pointer;
+            border-radius: 50%;
+            border: 2px solid #111827;
+        }
+        .control-panel input[type="range"]::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            background: #3b82f6;
+            cursor: pointer;
+            border-radius: 50%;
+            border: 2px solid #111827;
+        }
+        .video-container canvas {
+            width: 100%;
+            height: auto;
+            border-radius: 0.5rem;
+            background-color: #1f2937;
+        }
+    </style>
+</head>
+<body class="flex h-screen">
+    <!-- Hidden video element to stream webcam feed -->
+    <video id="video" playsinline autoplay muted style="display:none;"></video>
+    
+    <!-- Control Panel on the left -->
+    <div class="control-panel w-1/4 h-full bg-gray-900 p-6 overflow-y-auto shadow-lg">
+        <h1 class="text-2xl font-bold mb-6 text-blue-400">Effect Controls</h1>
+
+        <div class="space-y-6">
+            <div>
+                <label for="depth">Depth <span id="depthValue" class="text-blue-300">1</span></label>
+                <input type="range" id="depth" min="-10" max="10" value="1" step="1">
+            </div>
+            <div>
+                <label for="height">Height <span id="heightValue" class="text-blue-300">1</span></label>
+                <input type="range" id="height" min="-10" max="10" value="1" step="1">
+            </div>
+            <div>
+                <label for="opacity">Opacity <span id="opacityValue" class="text-blue-300">1.0</span></label>
+                <input type="range" id="opacity" min="0" max="1" value="1" step="0.01">
+            </div>
+            <div>
+                <label for="fuzziness">Fuzziness <span id="fuzzinessValue" class="text-blue-300">0</span>px</label>
+                <input type="range" id="fuzziness" min="0" max="10" value="0" step="0.1">
+            </div>
+             <div>
+                <label for="delay">Dynamic Delay <span id="delayValue" class="text-blue-300">0</span></label>
+                <input type="range" id="delay" min="0" max="10" value="0" step="1">
+            </div>
+
+            <div class="pt-4">
+                 <h2 class="text-lg font-semibold mb-2 text-blue-400">RGB Flow</h2>
+                <div>
+                    <label for="rProp" class="text-red-400">Red Proportion <span id="rPropValue" class="text-red-300">0.3</span></label>
+                    <input type="range" id="rProp" min="0" max="1" value="0.3" step="0.01">
+                </div>
+                <div>
+                    <label for="gProp" class="text-green-400">Green Proportion <span id="gPropValue" class="text-green-300">0.59</span></label>
+                    <input type="range" id="gProp" min="0" max="1" value="0.59" step="0.01">
+                </div>
+                <div>
+                    <label for="bProp" class="text-blue-400">Blue Proportion <span id="bPropValue" class="text-blue-300">0.11</span></label>
+                    <input type="range" id="bProp" min="0" max="1" value="0.11" step="0.01">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Video Display on the right -->
+    <div class="w-3/4 h-full flex flex-col items-center justify-center p-6 bg-gray-800">
+        <div class="grid grid-cols-2 gap-6 w-full max-w-7xl">
+            <div class="video-container">
+                <h2 class="text-center text-xl font-semibold mb-2">Original</h2>
+                <canvas id="originalCanvas"></canvas>
+            </div>
+            <div class="video-container">
+                <h2 class="text-center text-xl font-semibold mb-2">Relief Effect</h2>
+                <canvas id="effectCanvas"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const originalCanvas = document.getElementById('originalCanvas');
+        const effectCanvas = document.getElementById('effectCanvas');
+        const originalCtx = originalCanvas.getContext('2d');
+        const effectCtx = effectCanvas.getContext('2d', { willReadFrequently: true });
+
+        // Control inputs
+        const depthSlider = document.getElementById('depth');
+        const heightSlider = document.getElementById('height');
+        const opacitySlider = document.getElementById('opacity');
+        const fuzzinessSlider = document.getElementById('fuzziness');
+        const delaySlider = document.getElementById('delay');
+        const rPropSlider = document.getElementById('rProp');
+        const gPropSlider = document.getElementById('gProp');
+        const bPropSlider = document.getElementById('bProp');
+        
+        // Value displays
+        const depthValue = document.getElementById('depthValue');
+        const heightValue = document.getElementById('heightValue');
+        const opacityValue = document.getElementById('opacityValue');
+        const fuzzinessValue = document.getElementById('fuzzinessValue');
+        const delayValue = document.getElementById('delayValue');
+        const rPropValue = document.getElementById('rPropValue');
+        const gPropValue = document.getElementById('gPropValue');
+        const bPropValue = document.getElementById('bPropValue');
+
+        let frameCount = 0;
+
+        // Function to set up webcam
+        async function setupWebcam() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                video.srcObject = stream;
+                video.addEventListener('loadedmetadata', () => {
+                    // Set canvas dimensions based on video aspect ratio
+                    const aspectRatio = video.videoWidth / video.videoHeight;
+                    const canvasWidth = effectCanvas.parentElement.offsetWidth;
+                    const canvasHeight = canvasWidth / aspectRatio;
+                    
+                    originalCanvas.width = video.videoWidth;
+                    originalCanvas.height = video.videoHeight;
+                    effectCanvas.width = video.videoWidth;
+                    effectCanvas.height = video.videoHeight;
+
+                    // Set display size
+                    originalCanvas.style.width = `${canvasWidth}px`;
+                    originalCanvas.style.height = `${canvasHeight}px`;
+                    effectCanvas.style.width = `${canvasWidth}px`;
+                    effectCanvas.style.height = `${canvasHeight}px`;
+                    
+                    renderLoop();
+                });
+            } catch (err) {
+                console.error("Error accessing webcam: ", err);
+                alert("Could not access webcam. Please allow camera access and refresh.");
+            }
+        }
+
+        // Main rendering loop
+        function renderLoop() {
+            if (video.paused || video.ended) {
+                return;
+            }
+
+            // Update slider value displays
+            depthValue.textContent = depthSlider.value;
+            heightValue.textContent = heightSlider.value;
+            opacityValue.textContent = parseFloat(opacitySlider.value).toFixed(2);
+            fuzzinessValue.textContent = `${parseFloat(fuzzinessSlider.value).toFixed(1)}px`;
+            delayValue.textContent = delaySlider.value;
+            rPropValue.textContent = parseFloat(rPropSlider.value).toFixed(2);
+            gPropValue.textContent = parseFloat(gPropSlider.value).toFixed(2);
+            bPropValue.textContent = parseFloat(bPropSlider.value).toFixed(2);
+            
+            // Draw original video to its canvas
+            originalCtx.drawImage(video, 0, 0, originalCanvas.width, originalCanvas.height);
+            
+            const delay = parseInt(delaySlider.value, 10);
+            
+            // Apply delay by only processing every Nth frame
+            if (frameCount % (delay + 1) === 0) {
+                // Apply fuzziness (blur)
+                const fuzziness = fuzzinessSlider.value;
+                effectCtx.filter = `blur(${fuzziness}px)`;
+                
+                // Draw video to the effect canvas (which will be blurred)
+                effectCtx.drawImage(video, 0, 0, effectCanvas.width, effectCanvas.height);
+                
+                // Reset filter to not affect getImageData/putImageData
+                effectCtx.filter = 'none'; 
+                
+                // Get pixel data from the (potentially blurred) effect canvas
+                const pixels = effectCtx.getImageData(0, 0, effectCanvas.width, effectCanvas.height);
+                const data = pixels.data;
+                const width = pixels.width;
+                const height = pixels.height;
+
+                const depth = parseInt(depthSlider.value);
+                const hgt = parseInt(heightSlider.value);
+                
+                const rProp = parseFloat(rPropSlider.value);
+                const gProp = parseFloat(gPropSlider.value);
+                const bProp = parseFloat(bPropSlider.value);
+                const totalProp = rProp + gProp + bProp || 1; // Avoid division by zero
+
+                // Create a copy for manipulation
+                const processedData = new Uint8ClampedArray(data.length);
+
+                for (let y = 0; y < height; y++) {
+                    for (let x = 0; x < width; x++) {
+                        const i = (y * width + x) * 4;
+                        
+                        // Calculate offset for neighbor pixel
+                        const neighborX = Math.min(width - 1, Math.max(0, x - depth));
+                        const neighborY = Math.min(height - 1, Math.max(0, y - hgt));
+                        const neighborI = (neighborY * width + neighborX) * 4;
+
+                        // Calculate brightness of current and neighbor pixels using proportions
+                        const currentBrightness = (data[i] * rProp + data[i + 1] * gProp + data[i + 2] * bProp) / totalProp;
+                        const neighborBrightness = (data[neighborI] * rProp + data[neighborI + 1] * gProp + data[neighborI + 2] * bProp) / totalProp;
+                        
+                        const diff = currentBrightness - neighborBrightness;
+                        const gray = 128 + diff;
+
+                        processedData[i] = gray;     // Red
+                        processedData[i + 1] = gray; // Green
+                        processedData[i + 2] = gray; // Blue
+                        processedData[i + 3] = 255;  // Alpha
+                    }
+                }
+                
+                // Put the processed data back onto a new ImageData object
+                const newImageData = new ImageData(processedData, width, height);
+                
+                // Apply global opacity
+                effectCtx.globalAlpha = parseFloat(opacitySlider.value);
+                effectCtx.putImageData(newImageData, 0, 0);
+                effectCtx.globalAlpha = 1.0; // Reset global alpha
+            }
+
+            frameCount++;
+            requestAnimationFrame(renderLoop);
+        }
+
+        // Start the process
+        setupWebcam();
+
+    </script>
+</body>
+</html>
