@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Web Camera FX (Black & White)</title>
+  <style>
+    :root{ --bg:#fff; --fg:#000; --muted:#666; --line:#e7e7e7; }
+    *{ box-sizing:border-box }
+    html,body{ height:100%; margin:0; font-family:Inter, ui-sans-serif, -apple-system, Segoe UI, Roboto, Helvetica, Arial }
+    body{ background:var(--bg); color:var(--fg) }
+
+    .app{ display:flex; min-height:100vh }
+
+    /* Left sidebar */
+    .sidebar{ width:320px; padding:22px; border-right:1px solid var(--line); }
+    .brand{ font-weight:800; letter-spacing:.3px; }
+    .sub{ color:var(--muted); font-size:12px; margin-top:4px }
+
+    .section{ margin-top:18px }
+    .control{ margin:14px 0 }
+    label{ display:flex; justify-content:space-between; align-items:center; font-size:12px; color:#111; margin-bottom:6px }
+    .val{ color:var(--muted); margin-left:8px; }
+    input[type=file]{ width:100% }
+    input[type=range]{ width:100% }
+
+    .switch{ width:40px; height:22px; background:#fff; border:1px solid #cfcfcf; border-radius:22px; position:relative; cursor:pointer }
+    .switch .dot{ position:absolute; top:1px; left:1px; width:18px; height:18px; background:#111; border-radius:50%; transition:left .15s, background .15s }
+    .switch.on{ background:#111 }
+    .switch.on .dot{ left:21px; background:#fff }
+
+    .row{ display:flex; gap:8px; align-items:center }
+    button{ background:#000; color:#fff; border:none; padding:10px 12px; border-radius:6px; cursor:pointer }
+    .ghost{ background:transparent; color:#000; border:1px solid var(--line) }
+
+    /* Right side */
+    .main{ flex:1; display:flex; flex-direction:column; padding:18px; }
+    .stage{ flex:1; display:flex; border:1px solid var(--line); border-radius:8px; overflow:hidden }
+    .viewer{ flex:1; background:#000; display:flex; align-items:center; justify-content:center }
+    canvas{ max-width:100%; max-height:100% }
+    .sidepanel{ width:240px; padding:12px; border-left:1px solid var(--line); background:#fff }
+    .meta{ color:var(--muted); font-size:12px }
+
+    @media (max-width:900px){ .sidepanel{ display:none } .sidebar{ width:284px; padding:16px } }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">BW Camera FX</div>
+      <div class="sub">Simple black & white · realtime canvas effects</div>
+
+      <div class="section">
+        <div class="control">
+          <label>Upload file <span id="fileName" class="val">none</span></label>
+          <input id="fileInput" type="file" accept="video/*,image/*" />
+        </div>
+        <div class="row">
+          <button id="useWebcam" class="ghost">Use Webcam</button>
+          <button id="reset">Reset</button>
+        </div>
+      </div>
+
+      <hr class="section" style="border:none; border-top:1px solid var(--line)" />
+
+      <div class="section">
+        <div class="control">
+          <label>Relief height <span id="reliefHeightV" class="val">1</span></label>
+          <input id="reliefHeight" type="range" min="1" max="8" value="1" />
+        </div>
+        <div class="control">
+          <label>Relief transparency <span id="reliefAlphaV" class="val">0.50</span></label>
+          <input id="reliefAlpha" type="range" min="0" max="100" value="50" />
+        </div>
+        <div class="control row" style="justify-content:space-between">
+          <label style="margin:0">Invert colors <span id="invertV" class="val">off</span></label>
+          <div id="invert" class="switch" role="switch" aria-checked="false"><div class="dot"></div></div>
+        </div>
+        <div class="control">
+          <label>Contrast <span id="contrastV" class="val">0</span></label>
+          <input id="contrast" type="range" min="-100" max="100" value="0" />
+        </div>
+        <div class="control">
+          <label>RGB separation (px) <span id="rgbSepV" class="val">0</span></label>
+          <input id="rgbSep" type="range" min="0" max="40" value="0" />
+        </div>
+        <div class="control">
+          <label>Delay (frames) <span id="delayV" class="val">0</span></label>
+          <input id="delay" type="range" min="0" max="120" value="0" />
+        </div>
+        <div class="control row" style="justify-content:space-between">
+          <label style="margin:0">Overlap (Difference) <span id="diffV" class="val">off</span></label>
+          <div id="diffMode" class="switch" role="switch" aria-checked="false"><div class="dot"></div></div>
+        </div>
+        <div class="control" id="diffThresholdWrap" style="display:none">
+          <label>Overlap threshold <span id="diffTVal" class="val">24</span></label>
+          <input id="diffThreshold" type="range" min="0" max="128" value="24" />
+        </div>
+      </div>
+
+      <div class="section meta">Tip: lower resolutions render faster. “Overlap (Difference)” shows only pixels similar to the frame N steps ago.</div>
+    </aside>
+
+    <main class="main">
+      <div class="stage">
+        <div class="viewer">
+          <canvas id="canvas"></canvas>
+          <video id="video" playsinline style="display:none" crossorigin="anonymous"></video>
+        </div>
+        <div class="sidepanel">
+          <div style="font-weight:700; margin-bottom:8px">Playback</div>
+          <div class="meta" style="margin-bottom:8px">Looping video — left controls apply in real time.</div>
+          <div class="row" style="margin-bottom:8px">
+            <button id="playPause">Play/Pause</button>
+            <button id="restart" class="ghost">Restart</button>
+          </div>
+          <div class="meta">Source:</div>
+          <div id="srcInfo" class="meta" style="word-break:break-all; margin-top:6px">—</div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    // ===================== DOM & State =====================
+    const fileInput = document.getElementById('fileInput');
+    const fileName = document.getElementById('fileName');
+    const srcInfo = document.getElementById('srcInfo');
+
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+
+    const reliefHeight = document.getElementById('reliefHeight');
+    const reliefAlpha = document.getElementById('reliefAlpha');
+    const invert = document.getElementById('invert');
+    const contrast = document.getElementById('contrast');
+    const rgbSep = document.getElementById('rgbSep');
+    const delay = document.getElementById('delay');
+    const diffMode = document.getElementById('diffMode');
+    const diffThreshold = document.getElementById('diffThreshold');
+    const diffThresholdWrap = document.getElementById('diffThresholdWrap');
+
+    const reliefHeightV = document.getElementById('reliefHeightV');
+    const reliefAlphaV = document.getElementById('reliefAlphaV');
+    const invertV = document.getElementById('invertV');
+    const contrastV = document.getElementById('contrastV');
+    const rgbSepV = document.getElementById('rgbSepV');
+    const delayV = document.getElementById('delayV');
+    const diffV = document.getElementById('diffV');
+    const diffTVal = document.getElementById('diffTVal');
+
+    const playPause = document.getElementById('playPause');
+    const restart = document.getElementById('restart');
+    const useWebcam = document.getElementById('useWebcam');
+    const reset = document.getElementById('reset');
+
+    let raf = null;
+    let invertOn = false;
+    let diffOn = false;
+    const frameBuffer = []; // store ImageData frames
+
+    // ===================== Utils =====================
+    const clamp = (v,min,max)=> Math.max(min, Math.min(max, v));
+
+    function updateLabels(){
+      reliefHeightV.textContent = reliefHeight.value;
+      reliefAlphaV.textContent = (parseInt(reliefAlpha.value,10)/100).toFixed(2);
+      invertV.textContent = invertOn ? 'on' : 'off';
+      contrastV.textContent = contrast.value;
+      rgbSepV.textContent = rgbSep.value;
+      delayV.textContent = delay.value;
+      diffV.textContent = diffOn ? 'on' : 'off';
+      diffTVal.textContent = diffThreshold.value;
+    }
+
+    function setSwitch(el, on){
+      el.classList.toggle('on', on);
+      el.setAttribute('aria-checked', String(on));
+    }
+
+    function resizeCanvas(){
+      const w = video.videoWidth || 640; const h = video.videoHeight || 360;
+      canvas.width = w; canvas.height = h;
+    }
+
+    // Core image processing
+    function applyEffects(img){
+      const w = img.width, h = img.height;
+      const src = img.data;
+      const out = new ImageData(w,h);
+      const dst = out.data;
+
+      // Contrast factor
+      const c = clamp(parseInt(contrast.value,10), -100, 100);
+      const cf = (259*(c+255)) / (255*(259-c));
+
+      const height = clamp(parseInt(reliefHeight.value,10),1,8);
+      const alpha = clamp(parseInt(reliefAlpha.value,10)/100, 0, 1);
+      const sep = parseInt(rgbSep.value,10);
+
+      // Relief (emboss) overlay
+      // Compute embossed color E = center - neighbor(height,height) + 128, then blend: (1-alpha)*base + alpha*E
+      for(let y=0;y<h;y++){
+        for(let x=0;x<w;x++){
+          const i = (y*w + x)*4;
+          const nx = clamp(x+height,0,w-1);
+          const ny = clamp(y+height,0,h-1);
+          const ni = (ny*w + nx)*4;
+
+          let r = src[i]   - src[ni]   + 128;
+          let g = src[i+1] - src[ni+1] + 128;
+          let b = src[i+2] - src[ni+2] + 128;
+
+          // blend with original using transparency (alpha)
+          r = src[i]*(1-alpha) + r*alpha;
+          g = src[i+1]*(1-alpha) + g*alpha;
+          b = src[i+2]*(1-alpha) + b*alpha;
+
+          // contrast
+          r = cf*(r-128)+128; g = cf*(g-128)+128; b = cf*(b-128)+128;
+
+          // invert
+          if(invertOn){ r = 255-r; g = 255-g; b = 255-b; }
+
+          // write provisional values
+          dst[i] = clamp(r,0,255) | 0;
+          dst[i+1] = clamp(g,0,255) | 0;
+          dst[i+2] = clamp(b,0,255) | 0;
+          dst[i+3] = src[i+3];
+        }
+      }
+
+      // RGB separation: shift channel samples from neighboring pixels
+      if(sep !== 0){
+        const tmp = new Uint8ClampedArray(dst.length); tmp.set(dst);
+        for(let y=0;y<h;y++){
+          for(let x=0;x<w;x++){
+            const i = (y*w+x)*4;
+            const rx = clamp(x+sep,0,w-1);
+            const gx = clamp(x-sep,0,w-1);
+            const by = clamp(y-sep,0,h-1);
+            const ri = (y*w+rx)*4;
+            const gi = (y*w+gx)*4;
+            const bi = (by*w+x)*4;
+            dst[i]   = tmp[ri];
+            dst[i+1] = tmp[gi+1];
+            dst[i+2] = tmp[bi+2];
+          }
+        }
+      }
+
+      return out;
+    }
+
+    // Difference-overlap mode: keep only pixels that are similar to N-frames-ago
+    function applyDifferenceOverlap(current, previous, threshold){
+      const w = current.width, h = current.height;
+      const a = current.data, b = previous ? previous.data : null;
+      if(!b) return current; // nothing to compare
+      const out = new ImageData(w,h); const d = out.data;
+      for(let i=0;i<d.length;i+=4){
+        const dr = Math.abs(a[i]-b[i]);
+        const dg = Math.abs(a[i+1]-b[i+1]);
+        const db = Math.abs(a[i+2]-b[i+2]);
+        const diff = (dr + dg + db)/3; // grayscale difference
+        if(diff <= threshold){
+          // similar enough → keep current pixel (overlap)
+          d[i]=a[i]; d[i+1]=a[i+1]; d[i+2]=a[i+2]; d[i+3]=255;
+        }else{
+          // non-overlap → transparent (or black). We'll set alpha 0 so canvas shows only overlap.
+          d[i]=0; d[i+1]=0; d[i+2]=0; d[i+3]=0;
+        }
+      }
+      return out;
+    }
+
+    function render(){
+      if(video.paused || video.readyState < 2){ raf = requestAnimationFrame(render); return; }
+
+      const w = canvas.width, h = canvas.height;
+      ctx.drawImage(video, 0, 0, w, h);
+      const base = ctx.getImageData(0,0,w,h);
+
+      // push to buffer for delay
+      frameBuffer.push(base);
+      const n = clamp(parseInt(delay.value,10), 0, 240);
+      const maxBuf = n + 1;
+      while(frameBuffer.length > maxBuf) frameBuffer.shift();
+
+      const delayed = frameBuffer.length > n ? frameBuffer[frameBuffer.length-1-n] : null;
+
+      // apply standard effects first
+      let processed = applyEffects(base);
+
+      // overlap/difference (optional) applied AFTER effects, relative to delayed processed frame
+      if(diffOn && delayed){
+        // process delayed to be comparable in same domain
+        const delayedProcessed = applyEffects(delayed);
+        processed = applyDifferenceOverlap(processed, delayedProcessed, parseInt(diffThreshold.value,10));
+      }
+
+      ctx.putImageData(processed, 0, 0);
+
+      raf = requestAnimationFrame(render);
+    }
+
+    // ===================== Event wiring =====================
+    fileInput.addEventListener('change', e=>{
+      const f = e.target.files?.[0]; if(!f) return;
+      const url = URL.createObjectURL(f);
+      srcInfo.textContent = f.name; fileName.textContent = f.name;
+      video.srcObject = null; // in case webcam was active
+      video.src = url; video.loop = true; video.muted = true; video.play().catch(()=>{});
+    });
+
+    playPause.addEventListener('click', ()=>{ if(video.paused) video.play(); else video.pause(); });
+    restart.addEventListener('click', ()=>{ video.currentTime = 0; });
+
+    useWebcam.addEventListener('click', async ()=>{
+      try{
+        const stream = await navigator.mediaDevices.getUserMedia({ video:{width:640, height:480}, audio:false });
+        video.srcObject = stream; video.play(); srcInfo.textContent = 'Webcam'; fileName.textContent = 'Webcam';
+      }catch(e){ alert('Could not access webcam.'); }
+    });
+
+    reset.addEventListener('click', ()=>{
+      reliefHeight.value = 1; reliefAlpha.value = 50; contrast.value = 0; rgbSep.value = 0; delay.value = 0; diffThreshold.value = 24;
+      invertOn = false; diffOn = false; setSwitch(invert,false); setSwitch(diffMode,false); diffThresholdWrap.style.display='none';
+      updateLabels();
+      frameBuffer.length = 0; ctx.clearRect(0,0,canvas.width,canvas.height);
+      if(video.srcObject){ video.srcObject.getTracks().forEach(t=>t.stop()); video.srcObject=null; }
+      video.pause(); video.removeAttribute('src'); video.load(); srcInfo.textContent='—'; fileName.textContent='none';
+    });
+
+    invert.addEventListener('click', ()=>{ invertOn = !invertOn; setSwitch(invert, invertOn); updateLabels(); });
+    diffMode.addEventListener('click', ()=>{ diffOn = !diffOn; setSwitch(diffMode, diffOn); diffThresholdWrap.style.display = diffOn? 'block':'none'; updateLabels(); });
+
+    [reliefHeight, reliefAlpha, contrast, rgbSep, delay, diffThreshold].forEach(el=>{
+      el.addEventListener('input', updateLabels);
+    });
+
+    video.addEventListener('play', ()=>{ resizeCanvas(); cancelAnimationFrame(raf); raf = requestAnimationFrame(render); });
+    video.addEventListener('loadedmetadata', resizeCanvas);
+    video.addEventListener('pause', ()=> cancelAnimationFrame(raf));
+
+    updateLabels(); // initial
+
+    window.addEventListener('beforeunload', ()=>{ if(video.srcObject){ video.srcObject.getTracks().forEach(t=>t.stop()); } });
+  </script>
+</body>
+</html>
