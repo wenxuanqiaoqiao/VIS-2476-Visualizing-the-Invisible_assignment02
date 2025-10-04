@@ -1,51 +1,112 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    
-    <title>VIS 2476 Visualizing the Invisible</title>
-    
-    <style>
-        /* Basic styling for better readability */
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            margin: 40px;
-            background-color: #f7f7f7;
-            color: #333;
-        }
-        h1 {
-            border-bottom: 2px solid #eee;
-            padding-bottom: 10px;
-        }
-        ul {
-            list-style-type: none; /* Removes the bullet points */
-            padding: 0;
-        }
-        li {
-            margin-bottom: 12px; /* Adds space between the links */
-        }
-        a {
-            text-decoration: none; /* Removes the underline from links */
-            color: #0056b3;
-            font-size: 1.1em;
-        }
-        a:hover {
-            text-decoration: underline; /* Adds underline when you hover over a link */
-        }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VIS 2476 · Visualizing the Invisible</title>
+
+  <style>
+    :root {
+      --bg: #fafafa;
+      --fg: #111;
+      --muted: #666;
+      --accent: #000;
+      --border: #e5e5e5;
+    }
+
+    html, body {
+      height: 100%;
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      padding: 60px 24px;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+
+    h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      margin: 0;
+      border-bottom: 2px solid var(--border);
+      display: inline-block;
+      padding-bottom: 6px;
+    }
+
+    h2 {
+      font-size: 1rem;
+      font-weight: 400;
+      color: var(--muted);
+      margin-top: 8px;
+    }
+
+    ul {
+      list-style: none;
+      padding: 0;
+      max-width: 500px;
+      width: 100%;
+    }
+
+    li {
+      margin-bottom: 16px;
+    }
+
+    a {
+      display: block;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 16px 20px;
+      text-decoration: none;
+      color: var(--accent);
+      font-size: 1.05rem;
+      font-weight: 500;
+      letter-spacing: 0.01em;
+      transition: all 0.2s ease;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+    }
+
+    a:hover {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #fff;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+    }
+
+    footer {
+      margin-top: 60px;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+  </style>
 </head>
 <body>
+  <header>
+    <h1>VIS 2476 · Visualizing the Invisible</h1>
+    <h2>Interactive App Index</h2>
+  </header>
 
-    <h1>VIS 2476 Visualizing the Invisible APP Index</h1>
+  <ul>
+    <li><a href="bnwdotracker.html" target="_blank">Black & White Motion Tracker</a></li>
+    <li><a href="timelapse02.html" target="_blank">Time-Lapse Camera</a></li>
+    <li><a href="relief02.html" target="_blank">Relief Effect (v1)</a></li>
+    <li><a href="relief03.html" target="_blank">Relief Effect (v2)</a></li>
+  </ul>
 
-    <ul>
-        <li><a href="bnwdotracker.html" target="_blank">Black and White motion tracker</a></li>
-        <li><a href="timelapse02.html" target="_blank">Time Lapse camera</a></li>
-        <li><a href="relief02.html" target="_blank">Relief effect</a></li>
-        <li><a href="relief03.html" target="_blank">Relief effect2</a></li>
-        
-    </ul>
-
+  <footer>
+    &copy; 2025 · VIS 2776 Visualizing the invisible · Course Project Page
+  </footer>
 </body>
 </html>
