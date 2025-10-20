@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Optical Flow — Canvas Video Lab</title>
+  <style>
+    :root{
+      --bg:#000; --fg:#fff; --muted:#aaa; --accent:#fff; --border:#222;
+      --radius:16px;
+      --mono: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
+      --sans: Inter, ui-sans-serif,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%;}
+    body{
+      margin:0; background:var(--bg); color:var(--fg); font-family:var(--sans);
+      display:grid; grid-template-columns: 340px 1fr; gap:18px; padding:18px;
+    }
+    /* Sidebar */
+    aside{
+      background:#0a0a0a; border:1px solid var(--border); border-radius:var(--radius);
+      padding:16px; display:flex; flex-direction:column; gap:14px; max-height:calc(100vh - 36px);
+    }
+    aside h1{font-size:18px; margin:0 0 6px; letter-spacing:.2px}
+    .small{color:var(--muted); font-size:12px}
+    .row{display:flex; align-items:center; justify-content:space-between; gap:10px}
+    label{font-size:12px; color:var(--muted)}
+    input[type="range"]{width:100%}
+    input[type="number"], select{
+      width:92px; background:#111; color:#fff; border:1px solid #1e1e1e; border-radius:10px; padding:6px 8px;
+      font-family:var(--mono);
+    }
+    .btn{
+      background:#111; color:#fff; border:1px solid #1e1e1e; border-radius:12px; padding:10px 12px; cursor:pointer;
+      font-weight:600; letter-spacing:.2px;
+    }
+    .btn:disabled{opacity:.5; cursor:not-allowed}
+    .section{border-top:1px solid #111; padding-top:10px; margin-top:4px}
+    .field{display:grid; grid-template-columns: 1fr 88px; align-items:center; gap:10px; margin:6px 0}
+    .toggle{display:flex; align-items:center; gap:8px}
+    .kbd{font-family:var(--mono); background:#111; padding:2px 6px; border-radius:6px; border:1px solid #1e1e1e; color:#ddd}
+
+    /* Stage */
+    main{
+      display:grid; grid-template-rows: auto 1fr; gap:12px;
+    }
+    #stage{
+      position:relative; height:calc(100vh - 36px); border:1px solid var(--border); border-radius:var(--radius);
+      overflow:hidden; background:#000; display:flex; align-items:center; justify-content:center;
+    }
+    canvas{max-width:100%; max-height:100%; image-rendering:pixelated;}
+    #overlayInfo{
+      position:absolute; left:12px; bottom:12px; background:rgba(0,0,0,.55); color:#fff; padding:8px 10px; border-radius:10px; font:12px var(--mono);
+      border:1px solid #161616;
+    }
+    #topbar{display:flex; align-items:center; justify-content:space-between}
+    #topbar .pill{background:#0a0a0a; border:1px solid var(--border); padding:8px 10px; border-radius:999px; font:12px var(--mono); color:#ddd}
+
+    details{border:1px solid #111; border-radius:12px; padding:8px 10px}
+    details summary{cursor:pointer; color:#ddd}
+  </style>
+</head>
+<body>
+  <aside>
+    <h1>Optical Flow • <span class="small">Canvas Lab</span></h1>
+
+    <div class="section">
+      <button class="btn" id="pickBtn">Select Video</button>
+      <input id="file" type="file" accept="video/*" hidden />
+      <div class="small">Upload any video (short works best). The app computes <b>dense optical flow</b> in real time and renders a color‑coded field: Hue → direction, Saturation/Brightness → speed.</div>
+    </div>
+
+    <div class="section">
+      <div class="row"><strong>Playback</strong><span class="small">looping preview → right</span></div>
+      <div class="field"><label>Playback speed</label>
+        <select id="playbackRate">
+          <option value="0.5">0.5×</option>
+          <option value="0.75">0.75×</option>
+          <option value="1" selected>1×</option>
+          <option value="1.25">1.25×</option>
+          <option value="1.5">1.5×</option>
+        </select>
+      </div>
+      <div class="field"><label>Process every N frames</label><input id="frameStep" type="number" value="2" min="1" max="6" step="1"></div>
+      <div class="toggle"><input id="pauseToggle" type="checkbox"><label for="pauseToggle">Pause processing (show last flow)</label></div>
+    </div>
+
+    <div class="section">
+      <div class="row"><strong>Flow Model</strong><span class="small">Horn–Schunck</span></div>
+      <div class="field"><label>Downscale width</label><input id="downW" type="number" value="192" min="96" max="512" step="16"></div>
+      <div class="field"><label>Iterations</label><input id="iters" type="number" value="20" min="1" max="200" step="1"></div>
+      <div class="field"><label>Smoothness α</label><input id="alpha" type="number" value="10" min="0.1" max="200" step="0.1"></div>
+      <div class="field"><label>Magnitude scale</label><input id="magScale" type="number" value="10" min="1" max="100" step="1"></div>
+      <div class="toggle"><input id="bilateral" type="checkbox"><label for="bilateral">Edge‑preserving blur (preprocess)</label></div>
+      <div class="toggle"><input id="drawVectors" type="checkbox"><label for="drawVectors">Draw arrows overlay</label></div>
+      <div class="field"><label>Arrow stride</label><input id="vecStride" type="number" value="12" min="4" max="64" step="2"></div>
+    </div>
+
+    <div class="section">
+      <div class="row"><strong>Record</strong><span class="small">download .webm</span></div>
+      <div class="row" style="gap:8px">
+        <button class="btn" id="recBtn">● Start Recording</button>
+        <button class="btn" id="stopBtn" disabled>■ Stop</button>
+      </div>
+      <a id="dl" class="small" href="#" download hidden>Download recording</a>
+    </div>
+
+    <details class="section">
+      <summary><strong>How it works</strong></summary>
+      <div class="small" style="margin-top:8px">
+        We compute image gradients (I<sub>x</sub>, I<sub>y</sub>, I<sub>t</sub>) on a down‑scaled, blurred grayscale. Then iterate Horn–Schunck: find a dense field (u,v) minimizing brightness‑constancy + smoothness. Vector → HSV: hue=atan2(v,u), sat/value ∝ |(u,v)|.
+      </div>
+      <div class="small" style="margin-top:8px">Tips: reduce <span class="kbd">Downscale</span> or <span class="kbd">Iterations</span> if it lags; increase <span class="kbd">α</span> for smoother flow; raise <span class="kbd">Magnitude</span> to brighten low‑motion scenes.</div>
+    </details>
+  </aside>
+
+  <main>
+    <div id="topbar">
+      <div class="pill">White‑on‑Black • Minimal UI</div>
+      <div class="pill">Canvas‑only effects</div>
+    </div>
+    <section id="stage">
+      <canvas id="view"></canvas>
+      <div id="overlayInfo">0×0 • iters:0 • α:0 • ms:0</div>
+    </section>
+  </main>
+
+  <!-- Hidden media & working canvases -->
+  <video id="video" playsinline muted loop style="display:none"></video>
+  <canvas id="work" style="display:none"></canvas>
+  <canvas id="prev" style="display:none"></canvas>
+
+  <script>
+  // =============================
+  // Utilities (math & color)
+  // =============================
+  const clamp = (v,min,max)=>Math.max(min,Math.min(max,v));
+  const lerp = (a,b,t)=>a+(b-a)*t;
+
+  // HSV (0..360, 0..1, 0..1) to RGB (0..255)
+  function hsv2rgb(h, s, v){
+    let c = v * s;
+    let hp = (h % 360) / 60;
+    let x = c * (1 - Math.abs(hp % 2 - 1));
+    let r=0,g=0,b=0;
+    if (0<=hp && hp<1){r=c; g=x; b=0}
+    else if (1<=hp && hp<2){r=x; g=c; b=0}
+    else if (2<=hp && hp<3){r=0; g=c; b=x}
+    else if (3<=hp && hp<4){r=0; g=x; b=c}
+    else if (4<=hp && hp<5){r=x; g=0; b=c}
+    else {r=c; g=0; b=x}
+    let m = v - c;
+    return [(r+m)*255,(g+m)*255,(b+m)*255];
+  }
+
+  // Simple edge‑preserving blur (bilateral‑ish): fixed small window, intensity weight only
+  function bilateralLike(src,w,h){
+    const out = new Float32Array(src.length);
+    const kernelR = 1;
+    const sigmaI = 12; // intensity sigma
+    const invTwoSigma2 = 1/(2*sigmaI*sigmaI);
+    for(let y=0;y<h;y++){
+      for(let x=0;x<w;x++){
+        const i = y*w + x;
+        const center = src[i];
+        let sum=0, wsum=0;
+        for(let dy=-kernelR; dy<=kernelR; dy++){
+          const yy = clamp(y+dy,0,h-1);
+          for(let dx=-kernelR; dx<=kernelR; dx++){
+            const xx = clamp(x+dx,0,w-1);
+            const j = yy*w + xx;
+            const diff = src[j]-center;
+            const wI = Math.exp(-(diff*diff)*invTwoSigma2);
+            sum += src[j]*wI; wsum+=wI;
+          }
+        }
+        out[i]=sum/wsum;
+      }
+    }
+    return out;
+  }
+
+  // =============================
+  // DOM & State
+  // =============================
+  const els = {
+    pickBtn: document.getElementById('pickBtn'),
+    file: document.getElementById('file'),
+    video: document.getElementById('video'),
+    view: document.getElementById('view'),
+    work: document.getElementById('work'),
+    prev: document.getElementById('prev'),
+    overlay: document.getElementById('overlayInfo'),
+    playbackRate: document.getElementById('playbackRate'),
+    frameStep: document.getElementById('frameStep'),
+    pauseToggle: document.getElementById('pauseToggle'),
+    downW: document.getElementById('downW'),
+    iters: document.getElementById('iters'),
+    alpha: document.getElementById('alpha'),
+    magScale: document.getElementById('magScale'),
+    bilateral: document.getElementById('bilateral'),
+    drawVectors: document.getElementById('drawVectors'),
+    vecStride: document.getElementById('vecStride'),
+    recBtn: document.getElementById('recBtn'),
+    stopBtn: document.getElementById('stopBtn'),
+    dl: document.getElementById('dl'),
+  };
+
+  // Work contexts
+  const vctx = els.view.getContext('2d', { willReadFrequently:true });
+  const wctx = els.work.getContext('2d', { willReadFrequently:true });
+  const pctx = els.prev.getContext('2d', { willReadFrequently:true });
+
+  let lastWidth = 0, lastHeight = 0;
+  let frameCount=0;
+  let lastPerf=0;
+
+  // Recording
+  let mediaRecorder=null; let chunks=[];
+
+  // =============================
+  // Video Loading & Playback
+  // =============================
+  els.pickBtn.addEventListener('click', ()=> els.file.click());
+  els.file.addEventListener('change', e => {
+    const f = e.target.files?.[0];
+    if(!f) return;
+    const url = URL.createObjectURL(f);
+    els.video.src = url;
+    els.video.playbackRate = parseFloat(els.playbackRate.value);
+    els.video.addEventListener('loadeddata', ()=>{
+      // Fit canvas to video display size
+      const maxW = document.getElementById('stage').clientWidth - 24;
+      const maxH = document.getElementById('stage').clientHeight - 24;
+      const {videoWidth:vw, videoHeight:vh} = els.video;
+      const scale = Math.min(maxW/vw, maxH/vh, 1);
+      const cw = Math.floor(vw*scale);
+      const ch = Math.floor(vh*scale);
+      els.view.width=cw; els.view.height=ch;
+      els.work.width=cw; els.work.height=ch;
+      els.prev.width=cw; els.prev.height=ch;
+      lastWidth=cw; lastHeight=ch;
+      els.video.loop = true;
+      els.video.play().catch(()=>{});
+      requestAnimationFrame(tick);
+    }, { once:true });
+  });
+
+  els.playbackRate.addEventListener('change', ()=>{
+    els.video.playbackRate = parseFloat(els.playbackRate.value);
+  });
+
+  // =============================
+  // Horn–Schunck Flow (canvas → Float32)
+  // =============================
+  function toGrayscaleF32(imgData){
+    const {data,width,height} = imgData;
+    const out = new Float32Array(width*height);
+    for(let i=0,j=0;i<data.length;i+=4,j++){
+      // Rec. 709 luma
+      out[j] = 0.2126*data[i] + 0.7152*data[i+1] + 0.0722*data[i+2];
+    }
+    return out;
+  }
+
+  function resizeF32(src, sw, sh, tw){
+    const th = Math.round(sh * (tw/sw));
+    const out = new Float32Array(tw*th);
+    // Simple box sampling
+    for(let y=0;y<th;y++){
+      const sy = Math.floor(y * sh / th);
+      for(let x=0;x<tw;x++){
+        const sx = Math.floor(x * sw / tw);
+        out[y*tw + x] = src[sy*sw + sx];
+      }
+    }
+    return {data:out, w:tw, h:th};
+  }
+
+  // Compute gradients with central differences & temporal diff
+  function gradients(curr, prev, w, h){
+    const Ix=new Float32Array(w*h), Iy=new Float32Array(w*h), It=new Float32Array(w*h);
+    for(let y=0;y<h;y++){
+      for(let x=0;x<w;x++){
+        const i=y*w+x;
+        const xm = x>0? x-1 : x, xp = x<w-1? x+1:x;
+        const ym = y>0? y-1 : y, yp = y<h-1? y+1:y;
+        Ix[i] = (curr[y*w+xp]-curr[y*w+xm])/2;
+        Iy[i] = (curr[yp*w+x]-curr[ym*w+x])/2;
+        It[i] = curr[i] - prev[i];
+      }
+    }
+    return {Ix,Iy,It};
+  }
+
+  // Box blur average of u,v
+  function avg2(u,v,w,h){
+    const uo=new Float32Array(w*h), vo=new Float32Array(w*h);
+    for(let y=0;y<h;y++){
+      for(let x=0;x<w;x++){
+        let sumu=0,sumv=0,count=0;
+        for(let dy=-1;dy<=1;dy++){
+          const yy=clamp(y+dy,0,h-1);
+          for(let dx=-1;dx<=1;dx++){
+            const xx=clamp(x+dx,0,w-1);
+            const j=yy*w+xx; sumu+=u[j]; sumv+=v[j]; count++;
+          }
+        }
+        const i=y*w+x; uo[i]=sumu/count; vo[i]=sumv/count;
+      }
+    }
+    return {uo,vo};
+  }
+
+  function hornSchunck(Ix,Iy,It,w,h,alpha,iters){
+    const a = alpha*alpha;
+    let u=new Float32Array(w*h), v=new Float32Array(w*h);
+    for(let k=0;k<iters;k++){
+      const {uo,vo} = avg2(u,v,w,h);
+      for(let i=0;i<w*h;i++){
+        const num = (Ix[i]*uo[i] + Iy[i]*vo[i] + It[i]);
+        const den = a + Ix[i]*Ix[i] + Iy[i]*Iy[i] + 1e-6;
+        u[i] = uo[i] - (Ix[i]*num)/den;
+        v[i] = vo[i] - (Iy[i]*num)/den;
+      }
+    }
+    return {u,v};
+  }
+
+  // Draw HSV field back to the display canvas, optionally with vector arrows
+  function drawFlow(u,v,w,h, magScale, drawVectors, stride){
+    // Map to view canvas size
+    const vw = els.view.width, vh = els.view.height;
+    const img = vctx.createImageData(w,h);
+    for(let i=0;i<w*h;i++){
+      const dx=u[i], dy=v[i];
+      const ang = Math.atan2(dy,dx); // -pi..pi
+      const mag = Math.hypot(dx,dy);
+      const hue = (ang*180/Math.PI + 360) % 360; // 0..360
+      const sat = clamp(mag*magScale/10, 0, 1);
+      const val = clamp(0.6 + 0.4*Math.min(1, mag*magScale/8), 0, 1);
+      const [r,g,b] = hsv2rgb(hue,sat,val);
+      const j=i*4; img.data[j]=r; img.data[j+1]=g; img.data[j+2]=b; img.data[j+3]=255;
+    }
+    // Put small image, then scale up with smoothing
+    const tmp = document.createElement('canvas'); tmp.width=w; tmp.height=h;
+    const tctx = tmp.getContext('2d'); tctx.putImageData(img,0,0);
+    vctx.imageSmoothingEnabled = true;
+    vctx.drawImage(tmp,0,0,vw,vh);
+
+    if(drawVectors){
+      vctx.save();
+      vctx.strokeStyle = 'rgba(255,255,255,0.9)';
+      vctx.lineWidth = 1;
+      for(let y=0;y<h;y+=stride){
+        for(let x=0;x<w;x+=stride){
+          const i = y*w+x;
+          const dx=u[i], dy=v[i];
+          const sx = x*vw/w, sy = y*vh/h;
+          const ex = sx + dx*magScale*2, ey = sy + dy*magScale*2;
+          vctx.beginPath(); vctx.moveTo(sx,sy); vctx.lineTo(ex,ey); vctx.stroke();
+          // arrow head
+          const ang = Math.atan2(ey-sy, ex-sx);
+          const ah=4; vctx.beginPath(); vctx.moveTo(ex,ey);
+          vctx.lineTo(ex-ah*Math.cos(ang-0.5), ey-ah*Math.sin(ang-0.5));
+          vctx.moveTo(ex,ey);
+          vctx.lineTo(ex-ah*Math.cos(ang+0.5), ey-ah*Math.sin(ang+0.5));
+          vctx.stroke();
+        }
+      }
+      vctx.restore();
+    }
+  }
+
+  // =============================
+  // Render Loop
+  // =============================
+  let lastGraySmall=null; // previous frame (downscaled)
+
+  function tick(){
+    if(els.video.readyState>=2){
+      // Draw current video frame to work canvas (display size)
+      wctx.drawImage(els.video,0,0,lastWidth,lastHeight);
+      if(!els.pauseToggle.checked && (frameCount++ % parseInt(els.frameStep.value) === 0)){
+        const img = wctx.getImageData(0,0,lastWidth,lastHeight);
+        let gray = toGrayscaleF32(img);
+        if(els.bilateral.checked){ gray = bilateralLike(gray,lastWidth,lastHeight); }
+        const downW = parseInt(els.downW.value);
+        const {data:currSmall, w:sw, h:sh} = resizeF32(gray, lastWidth, lastHeight, downW);
+
+        if(lastGraySmall && lastGraySmall.length === currSmall.length){
+          const {Ix,Iy,It} = gradients(currSmall,lastGraySmall,sw,sh);
+          const iters = parseInt(els.iters.value);
+          const alpha = parseFloat(els.alpha.value);
+          const t0 = performance.now();
+          const {u,v} = hornSchunck(Ix,Iy,It,sw,sh,alpha,iters);
+          lastPerf = performance.now() - t0;
+          drawFlow(u,v,sw,sh, parseFloat(els.magScale.value), els.drawVectors.checked, parseInt(els.vecStride.value));
+        } else {
+          // No prev yet → just draw current frame (dimmed)
+          vctx.globalAlpha = 0.2; vctx.drawImage(els.video,0,0,lastWidth,lastHeight); vctx.globalAlpha = 1;
+        }
+        lastGraySmall = currSmall; // keep as previous
+      }
+      // Always show latest frame if paused (keep last visual)
+    }
+
+    // HUD
+    els.overlay.textContent = `${lastWidth}×${lastHeight} • iters:${els.iters.value} • α:${els.alpha.value} • ms:${lastPerf.toFixed(1)}`;
+
+    requestAnimationFrame(tick);
+  }
+
+  // =============================
+  // Recording via MediaRecorder
+  // =============================
+  function startRecording(){
+    if(mediaRecorder && mediaRecorder.state==='recording') return;
+    chunks=[];
+    const stream = els.view.captureStream(30);
+    mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
+    mediaRecorder.ondataavailable = e=>{ if(e.data.size>0) chunks.push(e.data); };
+    mediaRecorder.onstop = ()=>{
+      const blob = new Blob(chunks, { type:'video/webm' });
+      const url = URL.createObjectURL(blob);
+      els.dl.href = url; els.dl.download = 'optical-flow.webm'; els.dl.hidden=false;
+    };
+    mediaRecorder.start();
+    els.recBtn.disabled = true; els.stopBtn.disabled=false;
+  }
+
+  function stopRecording(){
+    if(mediaRecorder && mediaRecorder.state==='recording'){
+      mediaRecorder.stop();
+      els.recBtn.disabled=false; els.stopBtn.disabled=true;
+    }
+  }
+
+  els.recBtn.addEventListener('click', startRecording);
+  els.stopBtn.addEventListener('click', stopRecording);
+
+  // Keyboard: R to start/stop, Space to pause processing
+  window.addEventListener('keydown', (e)=>{
+    if(e.key==='r' || e.key==='R'){
+      if(mediaRecorder && mediaRecorder.state==='recording') stopRecording(); else startRecording();
+    } else if(e.code==='Space'){
+      els.pauseToggle.checked = !els.pauseToggle.checked;
+      e.preventDefault();
+    }
+  });
+
+  // Resize handling: keep canvas fitted inside stage
+  const ro = new ResizeObserver(() => {
+    if(!els.video.videoWidth) return;
+    const maxW = document.getElementById('stage').clientWidth - 24;
+    const maxH = document.getElementById('stage').clientHeight - 24;
+    const {videoWidth:vw, videoHeight:vh} = els.video;
+    const scale = Math.min(maxW/vw, maxH/vh, 1);
+    const cw = Math.floor(vw*scale);
+    const ch = Math.floor(vh*scale);
+    els.view.width=cw; els.view.height=ch; els.work.width=cw; els.work.height=ch; els.prev.width=cw; els.prev.height=ch;
+    lastWidth=cw; lastHeight=ch;
+  });
+  ro.observe(document.getElementById('stage'));
+
+  </script>
+</body>
+</html>
