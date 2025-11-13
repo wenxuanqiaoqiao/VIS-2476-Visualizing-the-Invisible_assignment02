@@ -1,0 +1,526 @@
+<!DOCTYPE html> 
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Canvas Video — Motion Tile + Forced Perspective</title>
+<style>
+  /* Original CSS unchanged */
+  :root {
+    --bg: #ffffff;
+    --fg: #111111;
+    --muted: #6b7280;
+    --line: #e5e7eb;
+    --line-dark: #d1d5db;
+    --accent: #111111;
+    --radius: 14px;
+  }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; }
+  .app { display: grid; grid-template-columns: 320px 1fr; min-height: 100vh; }
+  @media (max-width: 980px) { .app { grid-template-columns: 1fr; } }
+  .sidebar { border-right: 1px solid var(--line); padding: 18px 16px 20px; }
+  .panel { padding: 16px; display: grid; place-items: center; }
+  .card { border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; background: #fff; }
+  h1 { font-size: 18px; margin: 0 0 6px; }
+  .subtle { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .section { border-top: 1px solid var(--line); padding-top: 14px; margin-top: 14px; }
+  .row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; margin: 10px 0 12px; }
+  .row label { font-size: 13px; color: var(--fg); }
+  .row .val { color: var(--muted); min-width: 48px; text-align: right; }
+  input[type="range"] { width: 100%; appearance: none; height: 4px; background: var(--line-dark); border-radius: 999px; }
+  input[type="range"]::-webkit-slider-thumb { appearance: none; width: 16px; height: 16px; border-radius: 50%; background: var(--accent); cursor: pointer; }
+  input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line-dark); border-radius: 12px; padding: 10px 12px; background: #fff; cursor: pointer; }
+  .btn.primary { border-color: #111; background: #111; color: #fff; }
+  .stage { width: min(100%, 1000px); }
+  .videoWrap { position: relative; width: 100%; display: grid; place-items: center; background: #fff; border-radius: 12px; overflow: hidden; border: 1px dashed var(--line-dark); }
+</style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <h1>Web Camera App</h1>
+      <input id="fileInput" type="file" accept="video/mp4,video/webm" /><br/>
+      <button id="playBtn" class="btn">Play</button>
+      <button id="pauseBtn" class="btn">Pause</button>
+      <button id="loopBtn" class="btn">Loop: On</button>
+
+      <div class="section">
+        <label>Tiles X <span id="tileXVal">3</span></label>
+        <input id="tileX" type="range" min="0.5" max="8" step="0.1" value="3">
+        <label>Tiles Y <span id="tileYVal">3</span></label>
+        <input id="tileY" type="range" min="0.5" max="8" step="0.1" value="3">
+        <label>Offset X <span id="offsetXVal">0.00</span></label>
+        <input id="offsetX" type="range" min="-1" max="1" step="0.01" value="0">
+        <label>Offset Y <span id="offsetYVal">0.00</span></label>
+        <input id="offsetY" type="range" min="-1" max="1" step="0.01" value="0">
+        <label>Scale (%) <span id="scaleVal">100</span></label>
+        <input id="scale" type="range" min="50" max="200" step="1" value="100">
+        <label><input id="mirrorX" type="checkbox"> Mirror X</label>
+        <label><input id="mirrorY" type="checkbox"> Mirror Y</label>
+      </div>
+
+      <!-- NEW SECTION: Frame Rate -->
+      <div class="section">
+        <label>Frame Rate (FPS) <span id="fpsVal">30</span></label>
+        <input id="fps" type="range" min="5" max="60" step="1" value="30">
+      </div>
+      <!-- END NEW SECTION -->
+
+      <!-- --- New Feature: Forced Perspective (UI) --- -->
+      <div class="section">
+        <h2 style="font-size:14px;margin:0 0 8px;">Forced Perspective</h2>
+        <label><input id="fpEnable" type="checkbox"> Enable Forced Perspective</label>
+        <div class="row">
+          <label>Focal Length <span id="fpFocalVal">1.00</span></label>
+          <input id="fpFocal" type="range" min="0.30" max="3.00" step="0.01" value="1.00">
+        </div>
+        <div class="row">
+          <label>Depth Scale <span id="fpDepthVal">0.50</span></label>
+          <input id="fpDepth" type="range" min="-1.00" max="1.00" step="0.01" value="0.50">
+        </div>
+        <div class="row">
+          <label>Horizontal Skew <span id="fpHSkewVal">0.00</span></label>
+          <input id="fpHSkew" type="range" min="-0.60" max="0.60" step="0.01" value="0.00">
+        </div>
+        <div class="row">
+          <label>Vertical Skew <span id="fpVSkewVal">0.00</span></label>
+          <input id="fpVSkew" type="range" min="-0.60" max="0.60" step="0.01" value="0.00">
+        </div>
+        <button id="downloadBtn" class="btn" style="width:100%;">Download Result (PNG)</button>
+        <div class="subtle">Perspective warp is computed per pixel (bilinear sampling) on the luminance grid.</div>
+      </div>
+      <!-- --- End New Feature: Forced Perspective (UI) --- -->
+
+      <!-- --- New Feature: Fisheye Distortion (UI) --- -->
+      <div class="section">
+        <h2 style="font-size:14px;margin:0 0 8px;">Fisheye Distortion</h2>
+        <label><input id="fisheyeEnable" type="checkbox"> Enable Fisheye</label>
+        <div class="row">
+          <label>Distortion Strength <span id="fisheyeStrengthVal">0.50</span></label>
+          <input id="fisheyeStrength" type="range" min="-1.00" max="3.00" step="0.01" value="0.50">
+        </div>
+        <div class="row">
+          <label>Radius <span id="fisheyeRadiusVal">0.75</span></label>
+          <input id="fisheyeRadius" type="range" min="0.10" max="2.00" step="0.01" value="0.75">
+        </div>
+        <div class="row">
+          <label>Center X <span id="fisheyeCenterXVal">0.50</span></label>
+          <input id="fisheyeCenterX" type="range" min="0.00" max="1.00" step="0.01" value="0.50">
+        </div>
+        <div class="row">
+          <label>Center Y <span id="fisheyeCenterYVal">0.50</span></label>
+          <input id="fisheyeCenterY" type="range" min="0.00" max="1.00" step="0.01" value="0.50">
+        </div>
+        <div class="subtle">Applies a spherical fisheye warp centered on the selected point.</div>
+      </div>
+      <!-- --- End New Feature: Fisheye Distortion (UI) --- -->
+
+      <div class="section">
+        <button id="recStart" class="btn primary">Start Recording</button>
+        <button id="recStop"  class="btn">Stop & Download</button>
+      </div>
+    </aside>
+
+    <main class="panel">
+      <div class="stage">
+        <div class="card">
+          <div class="videoWrap">
+            <video id="video" style="display:none;"></video>
+            <canvas id="canvas" width="960" height="540"></canvas>
+          </div>
+          <div class="subtle">Source: <span id="fileName">—</span></div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+<script>
+/* ---------- Original global references ---------- */
+const els = {
+  fileInput:document.getElementById('fileInput'),
+  playBtn:document.getElementById('playBtn'),
+  pauseBtn:document.getElementById('pauseBtn'),
+  loopBtn:document.getElementById('loopBtn'),
+  fileName:document.getElementById('fileName'),
+  video:document.getElementById('video'),
+  canvas:document.getElementById('canvas'),
+  tileX:document.getElementById('tileX'),
+  tileY:document.getElementById('tileY'),
+  offsetX:document.getElementById('offsetX'),
+  offsetY:document.getElementById('offsetY'),
+  scale:document.getElementById('scale'),
+  mirrorX:document.getElementById('mirrorX'),
+  mirrorY:document.getElementById('mirrorY'),
+  recStart:document.getElementById('recStart'),
+  recStop:document.getElementById('recStop'),
+  tileXVal:document.getElementById('tileXVal'),
+  tileYVal:document.getElementById('tileYVal'),
+  offsetXVal:document.getElementById('offsetXVal'),
+  offsetYVal:document.getElementById('offsetYVal'),
+  scaleVal:document.getElementById('scaleVal'),
+  fps:document.getElementById('fps'),       // NEW
+  fpsVal:document.getElementById('fpsVal'), // NEW
+
+  // --- New Feature: Forced Perspective (refs) ---
+  fpEnable:document.getElementById('fpEnable'),
+  fpFocal:document.getElementById('fpFocal'),
+  fpDepth:document.getElementById('fpDepth'),
+  fpHSkew:document.getElementById('fpHSkew'),
+  fpVSkew:document.getElementById('fpVSkew'),
+  fpFocalVal:document.getElementById('fpFocalVal'),
+  fpDepthVal:document.getElementById('fpDepthVal'),
+  fpHSkewVal:document.getElementById('fpHSkewVal'),
+  fpVSkewVal:document.getElementById('fpVSkewVal'),
+  downloadBtn:document.getElementById('downloadBtn'),
+
+  // --- New Feature: Fisheye Distortion (refs) ---
+  fisheyeEnable:document.getElementById('fisheyeEnable'),
+  fisheyeStrength:document.getElementById('fisheyeStrength'),
+  fisheyeRadius:document.getElementById('fisheyeRadius'),
+  fisheyeCenterX:document.getElementById('fisheyeCenterX'),
+  fisheyeCenterY:document.getElementById('fisheyeCenterY'),
+  fisheyeStrengthVal:document.getElementById('fisheyeStrengthVal'),
+  fisheyeRadiusVal:document.getElementById('fisheyeRadiusVal'),
+  fisheyeCenterXVal:document.getElementById('fisheyeCenterXVal'),
+  fisheyeCenterYVal:document.getElementById('fisheyeCenterYVal')
+};
+const outCtx = els.canvas.getContext('2d',{willReadFrequently:true});
+const offscreen=document.createElement('canvas');
+const srcCtx=offscreen.getContext('2d',{willReadFrequently:true});
+
+let rafId=null,isPlaying=false,mediaRecorder=null,recordedChunks=[];
+let frameRate=30; // NEW
+
+const params={tilesX:3,tilesY:3,offsetX:0,offsetY:0,scale:1,mirrorX:false,mirrorY:false};
+
+// --- New Feature: Forced Perspective (state) ---
+const fp = {
+  enabled:false,
+  focal:1.00,
+  depth:0.50,
+  hSkew:0.00,
+  vSkew:0.00
+};
+
+// --- New Feature: Fisheye Distortion (state) ---
+const fisheye = {
+  enabled:false,
+  strength:0.50,
+  radius:0.75,
+  centerX:0.50,
+  centerY:0.50
+};
+
+function updateUI(){
+  els.tileXVal.textContent=params.tilesX.toFixed(1);
+  els.tileYVal.textContent=params.tilesY.toFixed(1);
+  els.offsetXVal.textContent=params.offsetX.toFixed(2);
+  els.offsetYVal.textContent=params.offsetY.toFixed(2);
+  els.scaleVal.textContent=Math.round(params.scale*100);
+  els.fpsVal.textContent=frameRate; // NEW
+
+  // Forced Perspective UI mirrors
+  els.fpFocalVal.textContent=fp.focal.toFixed(2);
+  els.fpDepthVal.textContent=fp.depth.toFixed(2);
+  els.fpHSkewVal.textContent=fp.hSkew.toFixed(2);
+  els.fpVSkewVal.textContent=fp.vSkew.toFixed(2);
+
+  // Fisheye UI mirrors
+  els.fisheyeStrengthVal.textContent=fisheye.strength.toFixed(3);
+  els.fisheyeRadiusVal.textContent=fisheye.radius.toFixed(3);
+  els.fisheyeCenterXVal.textContent=fisheye.centerX.toFixed(2);
+  els.fisheyeCenterYVal.textContent=fisheye.centerY.toFixed(2);
+}
+
+function bind(el,key,fn){el.addEventListener('input',()=>{params[key]=fn(el.value);updateUI();});}
+bind(els.tileX,'tilesX',v=>parseFloat(v));
+bind(els.tileY,'tilesY',v=>parseFloat(v));
+bind(els.offsetX,'offsetX',v=>parseFloat(v));
+bind(els.offsetY,'offsetY',v=>parseFloat(v));
+bind(els.scale,'scale',v=>parseFloat(v)/100);
+els.mirrorX.onchange=()=>params.mirrorX=els.mirrorX.checked;
+els.mirrorY.onchange=()=>params.mirrorY=els.mirrorY.checked;
+
+/* ---------- NEW: Frame Rate control ---------- */
+els.fps.addEventListener('input',()=>{
+  frameRate=parseInt(els.fps.value,10);
+  updateUI();
+});
+/* -------------------------------------------- */
+
+/* --- New Feature: Forced Perspective (control bindings) --- */
+els.fpEnable.onchange=()=>{ fp.enabled = els.fpEnable.checked; };
+els.fpFocal.addEventListener('input',()=>{ fp.focal = parseFloat(els.fpFocal.value); updateUI(); });
+els.fpDepth.addEventListener('input',()=>{ fp.depth = parseFloat(els.fpDepth.value); updateUI(); });
+els.fpHSkew.addEventListener('input',()=>{ fp.hSkew = parseFloat(els.fpHSkew.value); updateUI(); });
+els.fpVSkew.addEventListener('input',()=>{ fp.vSkew = parseFloat(els.fpVSkew.value); updateUI(); });
+
+els.downloadBtn.onclick=()=>{
+  const a=document.createElement('a');
+  a.href=els.canvas.toDataURL('image/png');
+  a.download='forced-perspective_'+Date.now()+'.png';
+  document.body.appendChild(a);a.click();a.remove();
+};
+
+/* --- New Feature: Fisheye Distortion (control bindings) --- */
+els.fisheyeEnable.onchange=()=>{ fisheye.enabled = els.fisheyeEnable.checked; };
+els.fisheyeStrength.addEventListener('input',()=>{ fisheye.strength=parseFloat(els.fisheyeStrength.value); updateUI(); });
+els.fisheyeRadius.addEventListener('input',()=>{ fisheye.radius=parseFloat(els.fisheyeRadius.value); updateUI(); });
+els.fisheyeCenterX.addEventListener('input',()=>{ fisheye.centerX=parseFloat(els.fisheyeCenterX.value); updateUI(); });
+els.fisheyeCenterY.addEventListener('input',()=>{ fisheye.centerY=parseFloat(els.fisheyeCenterY.value); updateUI(); });
+
+updateUI();
+
+els.fileInput.onchange=e=>{
+  const f=e.target.files[0];if(!f)return;
+  els.fileName.textContent=f.name;
+  const url=URL.createObjectURL(f);
+  els.video.src=url;els.video.loop=true;els.video.muted=true;els.video.playsInline=true;
+  els.video.onloadedmetadata=()=>{
+    offscreen.width=els.video.videoWidth;
+    offscreen.height=els.video.videoHeight;
+    playVideo();
+  };
+};
+
+els.playBtn.onclick=playVideo;
+els.pauseBtn.onclick=()=>{els.video.pause();isPlaying=false;cancelAnimationFrame(rafId);};
+els.loopBtn.onclick=()=>{els.video.loop=!els.video.loop;els.loopBtn.textContent='Loop: '+(els.video.loop?'On':'Off');};
+
+async function playVideo(){await els.video.play();isPlaying=true;render();}
+
+/* Original wrapMirror + motionTile */
+function wrapMirror(u,size,mirror){
+  if(size<=0)return 0;
+  if(mirror){
+    const period=size*2;let t=u%period;if(t<0)t+=period;
+    return t<size?t:(period-1-t);
+  }else{
+    let t=u%size;if(t<0)t+=size;return t;
+  }
+}
+function motionTile(srcImg,outImg,p){
+  const src=srcImg.data,dst=outImg.data;
+  const sw=srcImg.width,sh=srcImg.height;
+  const ow=outImg.width,oh=outImg.height;
+  const tilesX=Math.max(0.1,p.tilesX);
+  const tilesY=Math.max(0.1,p.tilesY);
+  const scale=Math.max(0.01,p.scale);
+  const offX=p.offsetX,offY=p.offsetY;
+  let di=0;
+  for(let y=0;y<oh;y++){
+    const v=y/oh;
+    for(let x=0;x<ow;x++){
+      const u=x/ow;
+      const tx=(u*tilesX+offX)/scale;
+      const ty=(v*tilesY+offY)/scale;
+      const sxFloat=tx*sw;
+      const syFloat=ty*sh;
+      const sx0=wrapMirror(Math.floor(sxFloat),sw,p.mirrorX);
+      const sy0=wrapMirror(Math.floor(syFloat),sh,p.mirrorY);
+      const sx1=wrapMirror(sx0+1,sw,p.mirrorX);
+      const sy1=wrapMirror(sy0+1,sh,p.mirrorY);
+      const fx=sxFloat-Math.floor(sxFloat);
+      const fy=syFloat-Math.floor(syFloat);
+      const idx00=(sy0*sw+sx0)*4;
+      const idx10=(sy0*sw+sx1)*4;
+      const idx01=(sy1*sw+sx0)*4;
+      const idx11=(sy1*sw+sx1)*4;
+      for(let c=0;c<3;c++){
+        const c00=src[idx00+c],c10=src[idx10+c],c01=src[idx01+c],c11=src[idx11+c];
+        const val=c00*(1-fx)*(1-fy)+c10*fx*(1-fy)+c01*(1-fx)*fy+c11*fx*fy;
+        dst[di+c]=val;
+      }
+      dst[di+3]=255; di+=4;
+    }
+  }
+}
+
+/* --- New Feature: Forced Perspective (implementation) -----------------
+   Model: per-pixel warp approximating a pinhole camera with adjustable
+   focal length + depth exaggeration, plus horizontal/vertical skews.
+
+   Steps for each output pixel (xo, yo) in [0..ow-1], [0..oh-1]:
+   1) Normalize to centered coordinates nx, ny in [-0.5..0.5] then scale to [-1..1].
+   2) Apply skews:
+        nx' = nx + hSkew * ny      (tilt left/right)
+        ny' = ny + vSkew * nx      (tilt up/down)
+   3) Perspective scaling:
+        // perspective factor increases with ny (vertical depth cue)
+        persp = 1.0 / (1.0 + (ny' * depth) / max(0.2, focal))
+      Then amplify coordinates:
+        nxp = nx' * persp
+        nyp = ny' * persp
+   4) Map to source image (video frame) with bilinear sampling.
+--------------------------------------------------------------------- */
+function forcedPerspective(srcImg, outImg, fp){
+  const src=srcImg.data, sw=srcImg.width, sh=srcImg.height;
+  const dst=outImg.data,  ow=outImg.width, oh=outImg.height;
+
+  const focal=Math.max(0.01, fp.focal);
+  const depth=fp.depth;
+  const hSkew=fp.hSkew;
+  const vSkew=fp.vSkew;
+
+  let di=0;
+  for(let y=0;y<oh;y++){
+    // normalized to [-0.5, 0.5] and then scaled to [-1, 1] for sensitivity
+    const ny = ((y/oh) - 0.5) * 2.0;
+    for(let x=0;x<ow;x++){
+      const nx = ((x/ow) - 0.5) * 2.0;
+
+      // 1) skews (shear)
+      const nsx = nx + hSkew * ny;
+      const nsy = ny + vSkew * nx;
+
+      // 2) perspective factor (increase with vertical displacement)
+      const persp = 1.0 / (1.0 + (nsy * depth) / Math.max(0.2, focal));
+
+      // 3) apply perspective scaling
+      const nxp = nsx * persp;
+      const nyp = nsy * persp;
+
+      // 4) back to [0,1] in source space
+      const u = (nxp * 0.5 + 0.5);
+      const v = (nyp * 0.5 + 0.5);
+
+      // bilinear sample from the *source video frame*
+      const sxFloat = u * sw;
+      const syFloat = v * sh;
+
+      // clamp coordinates
+      let sx0 = Math.floor(sxFloat), sy0 = Math.floor(syFloat);
+      let sx1 = sx0 + 1,             sy1 = sy0 + 1;
+      if(sx0<0) sx0=0; if(sy0<0) sy0=0;
+      if(sx1>=sw) sx1=sw-1; if(sy1>=sh) sy1=sh-1;
+
+      const fx = sxFloat - sx0;
+      const fy = syFloat - sy0;
+
+      const idx00 = (sy0*sw + sx0) * 4;
+      const idx10 = (sy0*sw + sx1) * 4;
+      const idx01 = ((sy0+1)*sw + sx0) * 4;
+      const idx11 = ((sy0+1)*sw + sx1) * 4;
+
+      // bilinear for RGB
+      for(let c=0;c<3;c++){
+        const c00=src[idx00+c], c10=src[idx10+c], c01=src[idx01+c], c11=src[idx11+c];
+        dst[di+c] = c00*(1-fx)*(1-fy) + c10*fx*(1-fy) + c01*(1-fx)*fy + c11*fx*fy;
+      }
+      dst[di+3]=255;
+      di+=4;
+    }
+  }
+}
+
+/* --- New Feature: Fisheye Distortion (implementation) -----------------
+   Applies radial distortion from a chosen center. Positive strength bulges (fisheye),
+   negative strength pinches (barrel). Bilinear sampled.
+----------------------------------------------------------------------- */
+function fisheyeDistort(srcImg, outImg, f){
+  const src=srcImg.data, sw=srcImg.width, sh=srcImg.height;
+  const dst=outImg.data, ow=outImg.width, oh=outImg.height;
+
+  const cx = f.centerX * ow;
+  const cy = f.centerY * oh;
+  const maxR = Math.min(ow, oh) * f.radius * 0.5; // radius as fraction of min dimension
+  const k = f.strength;
+
+  let di=0;
+  for(let y=0;y<oh;y++){
+    for(let x=0;x<ow;x++){
+      const dx = x - cx;
+      const dy = y - cy;
+      const r = Math.sqrt(dx*dx + dy*dy);
+
+      let sxp = x, syp = y; // default: unchanged
+      if(r < maxR && maxR > 0){
+        const nr = r / maxR;              // [0..1]
+        // Smooth radial scaling: 1 + k * r^2 (common simple fisheye model)
+        const scale = 1 + k * (nr*nr);
+        const rr = r * scale;
+        const theta = Math.atan2(dy, dx);
+        sxp = cx + rr * Math.cos(theta);
+        syp = cy + rr * Math.sin(theta);
+      }
+
+      // map output pixel (x,y) -> source coords (sxp,syp) in [0..ow/oh] then to [0..sw/sh]
+      const u = sxp / ow;
+      const v = syp / oh;
+      const sxFloat = Math.min(sw-1.001, Math.max(0, u * sw));
+      const syFloat = Math.min(sh-1.001, Math.max(0, v * sh));
+
+      const sx0 = Math.floor(sxFloat), sy0 = Math.floor(syFloat);
+      const sx1 = Math.min(sw-1, sx0 + 1);
+      const sy1 = Math.min(sh-1, sy0 + 1);
+
+      const fx = sxFloat - sx0;
+      const fy = syFloat - sy0;
+
+      const idx00 = (sy0*sw + sx0) * 4;
+      const idx10 = (sy0*sw + sx1) * 4;
+      const idx01 = (sy1*sw + sx0) * 4;
+      const idx11 = (sy1*sw + sx1) * 4;
+
+      for(let c=0;c<3;c++){
+        const c00=src[idx00+c], c10=src[idx10+c], c01=src[idx01+c], c11=src[idx11+c];
+        dst[di+c] = c00*(1-fx)*(1-fy) + c10*fx*(1-fy) + c01*(1-fx)*fy + c11*fx*fy;
+      }
+      dst[di+3]=255;
+      di+=4;
+    }
+  }
+}
+
+/* ---------- Modified render loop to respect frameRate ---------- */
+function render(){
+  if(!isPlaying)return;
+
+  if(els.video.readyState>=2){
+    // Draw current video frame to offscreen (source space)
+    srcCtx.drawImage(els.video,0,0,offscreen.width,offscreen.height);
+    const s=srcCtx.getImageData(0,0,offscreen.width,offscreen.height);
+
+    let o=outCtx.getImageData(0,0,els.canvas.width,els.canvas.height);
+
+    // --- New effect routing: Fisheye is independent of Forced Perspective ---
+    if(fisheye.enabled){
+      fisheyeDistort(s, o, fisheye);
+    }else if(fp.enabled){
+      // Forced Perspective path (kept exactly as in original)
+      forcedPerspective(s, o, fp);
+    }else{
+      // Original path: Motion Tile
+      motionTile(s, o, params);
+    }
+
+    outCtx.putImageData(o,0,0);
+  }
+
+  const delay=1000/frameRate;
+  setTimeout(()=>{rafId=requestAnimationFrame(render);},delay);
+}
+/* -------------------------------------------------------------- */
+
+function getMime(){for(const c of ['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'])if(MediaRecorder.isTypeSupported(c))return c;return'';}
+els.recStart.onclick=()=>{
+  if(mediaRecorder&&mediaRecorder.state==='recording')return;
+  recordedChunks=[];
+  const stream=els.canvas.captureStream(30);
+  const mime=getMime();
+  mediaRecorder=new MediaRecorder(stream,mime?{mimeType:mime}:undefined);
+  mediaRecorder.ondataavailable=e=>{if(e.data.size>0)recordedChunks.push(e.data);};
+  mediaRecorder.onstop=()=>{
+    const blob=new Blob(recordedChunks,{type:'video/webm'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download='processed_'+Date.now()+'.webm';
+    document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),3000);
+  };
+  mediaRecorder.start();els.recStart.textContent='Recording...';
+};
+els.recStop.onclick=()=>{if(mediaRecorder&&mediaRecorder.state==='recording')mediaRecorder.stop();els.recStart.textContent='Start Recording';};
+</script>
+</body>
+</html>
